@@ -13,10 +13,11 @@
 int read_text (char *file_path, unsigned char *storage);
 void cpu_call (int algorithm, unsigned char *text, int text_size, unsigned char *pattern, int pattern_size, int *results);
 void gpu_call (int algorithm, unsigned char *text, int text_size, unsigned char *pattern, int pattern_size, int *results);
+int evaluate_result(int *results, int text_size, int pattern_size);
 
 int main (int argc, char *argv[]) {
 
-    int text_size, pattern_size, matches;
+    int text_size, pattern_size;
     int *results;
     unsigned char *text;
     unsigned char *pattern;
@@ -70,19 +71,13 @@ int main (int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     }
 
-    printf("%d %d", text_size, pattern_size);
-    //cpu_call(1, text, text_size, pattern, pattern_size, results);
-    gpu_call(1, text, text_size, pattern, pattern_size, results);
+    printf("Launching the algorithm on the host device (CPU)...\n");
+    cpu_call(1, text, text_size, pattern, pattern_size, results);
+    evaluate_result(results, text_size, pattern_size);
 
-    // Results
-    matches = 0;
-    for (int i = 0; i < (text_size - pattern_size); i++){
-        if (results[i] == 1){
-            matches++;
-            printf("Match found at index: %d\n", i+1);
-        }
-    }
-    printf("Total matches: %d\n", matches);
+    printf("Launching the algorithm on the device (GPU)...\n");
+    gpu_call(1, text, text_size, pattern, pattern_size, results);
+    evaluate_result(results, text_size, pattern_size);
 
     // Release memory
     free(text);
@@ -108,10 +103,10 @@ int read_text (char *file_path, unsigned char *storage) {
 void cpu_call (int algorithm, unsigned char *text, int text_size, unsigned char *pattern, int pattern_size, int *results) {
 
     double diff;
-    time_t start, end;
-
-    printf("Launching the algorithm on the host device (CPU)...\n");
-    time(&start);
+    time_t start;
+    
+    start = time(NULL);
+    printf("test: %f", start);
 
     switch (algorithm) {
         case NAIVE_RK:
@@ -120,15 +115,14 @@ void cpu_call (int algorithm, unsigned char *text, int text_size, unsigned char 
             break;
     }
 
-    time(&end);
-    diff = difftime(end, start);
-    printf("Operations terminated in %lf seconds.\n", diff);
+    diff = difftime(time(NULL), start);
+    printf("Operations terminated in %f seconds.\n", diff);
 
 }
 
 void gpu_call (int algorithm, unsigned char *text, int text_size, unsigned char *pattern, int pattern_size, int *results) {
 
-    int grid_size_x, grid_size_y, block_size_x, block_size_y;
+    int grid_size_x, grid_size_y, block_size_x, block_size_y, subtext_num;
     int *gpu_results;
     float elaboration_time;
     unsigned char *gpu_text, *gpu_pattern;
@@ -138,6 +132,21 @@ void gpu_call (int algorithm, unsigned char *text, int text_size, unsigned char 
     printf("Defining grid and block dimensions...\n");
     switch (algorithm) {
         case NAIVE_RK:
+            /* Used to define the granularity required from the RK-algorithm
+            *  g = TEXT_SIZE / SUBTEXTS_NUM
+            *  
+            *  The lower the value of g, the more threads are required to analyze everything
+            *  The higher the value of g, the higher will be the time required by each thread to complete the search
+            */
+            subtext_num = ceil(text_size / GRANULARITY_RK) + 1;
+
+            block_size_x = BLOCK_DIMENSION;
+            block_size_y = BLOCK_DIMENSION;
+
+            grid_size_x = ceil(sqrt(subtext_num / (block_size_x * block_size_y))) + 1;
+            grid_size_y = grid_size_x;
+            break;
+
         default:
             block_size_x = BLOCK_DIMENSION;
             block_size_y = BLOCK_DIMENSION;
@@ -149,7 +158,8 @@ void gpu_call (int algorithm, unsigned char *text, int text_size, unsigned char 
 
     dim3 gridDimension(grid_size_x, grid_size_y);
     dim3 blockDimension(block_size_x, block_size_y);
-    printf("Grid: %dx%d\nBlocks: %dx%d\n", grid_size_x, grid_size_y, block_size_x, block_size_y);
+    printf("Text size: %d bytes\nPattern size: %d bytes\n", text_size, pattern_size);
+    printf("Grid: %dx%d\nBlocks: %dx%d\n\n", grid_size_x, grid_size_y, block_size_x, block_size_y);
 
     // Events
     cudaEventCreate(&start);
@@ -162,19 +172,47 @@ void gpu_call (int algorithm, unsigned char *text, int text_size, unsigned char 
     cudaMemcpy(gpu_pattern, pattern, pattern_size * sizeof(unsigned char), cudaMemcpyHostToDevice);
 
     printf("Launching the kernel...\n");
-    cudaEventRecord(start);
     switch (algorithm) {
         case NAIVE_RK:
         default:
             cudaMalloc((void **) &gpu_results, (text_size-pattern_size) * sizeof(int));
-            naive_rk_gpu<<<gridDimension, blockDimension>>>(gpu_text, text_size, gpu_pattern, pattern_size, ceil(text_size / SUBTEXTS_NUM), gpu_results);
+
+            cudaEventRecord(start);
+            naive_rk_gpu<<<gridDimension, blockDimension>>>(gpu_text, text_size, gpu_pattern, pattern_size, GRANULARITY_RK, gpu_results);
+            cudaEventRecord(end);
+            cudaEventSynchronize(end);
+
             cudaMemcpy(results, gpu_results, (text_size-pattern_size) * sizeof(int), cudaMemcpyDeviceToHost);
             break;
     }
-    cudaEventRecord(end);
 
     // Compute time for elaboration
     cudaEventElapsedTime(&elaboration_time, start, end);
-    //elaboration_time /= 1000;
+    elaboration_time /= 1000;
     printf("Kernel operations terminated in %f seconds\n", elaboration_time);
+
+    cudaEventDestroy(start);
+    cudaEventDestroy(end);
+}
+
+// Evaluate the results obtained
+int evaluate_result(int *results, int text_size, int pattern_size) {
+
+    int matches = 0;
+    printf("\n");
+
+    for (int i = 0; i < (text_size - pattern_size); i++){
+        if (results[i] == 1){
+            matches++;
+            printf("Match found at index: %d\n", i+1);
+        }
+    }
+
+    printf("Total matches: %d\n\n", matches);
+
+    // Reset the results array after scanning it
+    for (int i = 0; i < (text_size - pattern_size); i++)
+        results[i] = 0;
+        
+    return matches;
 }

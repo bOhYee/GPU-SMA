@@ -82,7 +82,7 @@ __global__ void naive_rk_gpu (unsigned char *text, int text_size, unsigned char 
         h = (h * ALPHABET_SIZE) % OVERFLOW_PM;
 
     for (int i = 0; (i < search_size) && ((text_index + i) < (text_size - pattern_size + 1)); i++) {
-        //printf("Thread: %d\tIndex: %d", index, text_index);
+        //printf("Thread: %d\tIndex: %d\n", index, search_size);
 
         // If the hashes are equal, most likely a hit but a check is required
         found = 0;
@@ -104,4 +104,13 @@ __global__ void naive_rk_gpu (unsigned char *text, int text_size, unsigned char 
         if (hash_text < 0)
             hash_text += OVERFLOW_PM;
     }
+}
+
+/* Knuth-Morris-Pratt algorithm for CPU execution
+*  Makes use of the concept of the Longest Proper Suffix to avoid returning to the previous index when
+*  a miss verifies during the scan
+*/
+void kmp_cpu (unsigned char *text, int text_size, unsigned char *pattern, int pattern_size, int *match_result) {
+
+    
 }

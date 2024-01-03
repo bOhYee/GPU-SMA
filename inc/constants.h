@@ -8,13 +8,11 @@
 */
 #define PATTERN_SIZE 5
 
-/* Used to define the granularity required from the RK-algorithm
-*  g = TEXT_SIZE / SUBTEXTS_NUM
-*  
-*  The lower the value of g, the more threads are required to analyze everything
-*  The higher the value of g, the higher will be the time required by each thread to complete the search
-*/
-#define SUBTEXTS_NUM 5000
+/* Granularity represents how long the sequence each thread has to scan is long
+*  It affects how much a single thread work
+*  Its value also affects the parallelization factor of the GPU
+*/ 
+#define GRANULARITY_RK 10
 
 /* GPU parameters definition
 */

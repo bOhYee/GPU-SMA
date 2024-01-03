@@ -14,3 +14,9 @@ void rk_cpu (unsigned char *text, int text_size, unsigned char *pattern, int pat
 *  naive: no shared memory involved
 */
 __global__ void naive_rk_gpu (unsigned char *text, int text_size, unsigned char *pattern, int pattern_size, int search_size, int *match_result);
+
+/* Knuth-Morris-Pratt algorithm for CPU execution
+*  Makes use of the concept of the Longest Proper Suffix to avoid returning to the previous index when
+*  a miss verifies during the scan
+*/
+void kmp_cpu (unsigned char *text, int text_size, unsigned char *pattern, int pattern_size, int *match_result);
