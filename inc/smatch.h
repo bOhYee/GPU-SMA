@@ -19,4 +19,4 @@ __global__ void naive_rk_gpu (unsigned char *text, int text_size, unsigned char 
 *  Makes use of the concept of the Longest Proper Suffix to avoid returning to the previous index when
 *  a miss verifies during the scan
 */
-void kmp_cpu (unsigned char *text, int text_size, unsigned char *pattern, int pattern_size, int *match_result);
+void kmp_cpu (unsigned char *text, int text_size, unsigned char *pattern, int pattern_size, int *lps, int *match_result);

@@ -102,6 +102,7 @@ int read_text (char *file_path, unsigned char *storage) {
 
 void cpu_call (int algorithm, unsigned char *text, int text_size, unsigned char *pattern, int pattern_size, int *results) {
 
+    int *lps = NULL;
     double diff;
     time_t start;
     
@@ -110,8 +111,21 @@ void cpu_call (int algorithm, unsigned char *text, int text_size, unsigned char 
 
     switch (algorithm) {
         case NAIVE_RK:
-        default:
+        case RK:
             rk_cpu(text, text_size, pattern, pattern_size, results);
+            break;
+        
+        case NAIVE_KMP:
+        case KMP:
+        default:
+            lps = (int *) malloc(pattern_size * sizeof(int));
+            if (lps == NULL) {
+                fprintf(stderr, "Error during memory allocation of LPS vector!\n");
+                exit(EXIT_FAILURE);
+            }
+            
+            kmp_cpu(text, text_size, pattern, pattern_size, lps, results);
+            free(lps);
             break;
     }
 

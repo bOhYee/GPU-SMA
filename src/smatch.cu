@@ -110,7 +110,57 @@ __global__ void naive_rk_gpu (unsigned char *text, int text_size, unsigned char 
 *  Makes use of the concept of the Longest Proper Suffix to avoid returning to the previous index when
 *  a miss verifies during the scan
 */
-void kmp_cpu (unsigned char *text, int text_size, unsigned char *pattern, int pattern_size, int *match_result) {
+void kmp_cpu (unsigned char *text, int text_size, unsigned char *pattern, int pattern_size, int *lps, int *match_result) {
 
-    
+    int i, sub_i, j;
+
+    // Compute LPS values for the pattern string
+    i = 1; 
+    sub_i = 0;
+    lps[0] = 0;
+
+    while (i < pattern_size) {
+
+        if (pattern[i] == pattern[sub_i]) {
+            sub_i++;
+            lps[i++] = sub_i;
+        }
+        else {
+            if (sub_i != 0) {
+                sub_i = lps[sub_i-1];
+            }
+            else {
+                lps[i] = 0;
+                i++;
+            }
+        }
+
+    }
+
+    // Compare the strings now
+    i = 0;
+    j = 0;
+    while ((text_size - i) >= (pattern_size - j)) {
+
+        // Increase indexes if they keep matching
+        if (pattern[j] == text[i]) {
+            i++;
+            j++;
+        }
+        // When they don't match, try comparing the previous LPS string against the new character
+        else if (i < text_size && pattern[j] != text[i]) {
+            if (j != 0)
+                j = lps[j - 1];
+            else
+                i = i + 1;
+        }
+
+        /* When pattern is entirely evaluated against the text and a match has been found
+        *  Move back to the previous LPS to avoid re-comparing old characters
+        */
+        if (j == pattern_size) {
+            match_result[i-j] = 1;
+            j = lps[j-1];
+        } 
+    }
 }
