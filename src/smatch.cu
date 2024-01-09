@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include "../inc/constants.h"
 #include "../inc/smatch.h"
 
 /* Rabin-Karp algorithm for CPU execution
@@ -106,13 +107,13 @@ __global__ void naive_rk_gpu (unsigned char *text, int text_size, unsigned char 
     }
 }
 
-/* Knuth-Morris-Pratt algorithm for CPU execution
-*  Makes use of the concept of the Longest Proper Suffix to avoid returning to the previous index when
-*  a miss verifies during the scan
-*/
-void kmp_cpu (unsigned char *text, int text_size, unsigned char *pattern, int pattern_size, int *lps, int *match_result) {
 
-    int i, sub_i, j;
+/* Longest Proper Suffix calculation function
+*  Used by the KMP algorithm to avoid useless comparisons between operands
+*/
+void compute_lps (unsigned char *pattern, int pattern_size, int *lps) {
+
+    int i, sub_i;
 
     // Compute LPS values for the pattern string
     i = 1; 
@@ -136,6 +137,17 @@ void kmp_cpu (unsigned char *text, int text_size, unsigned char *pattern, int pa
         }
 
     }
+}
+
+
+/* Knuth-Morris-Pratt algorithm for CPU execution
+*  Makes use of the concept of the Longest Proper Suffix to avoid returning to the previous index when
+*  a miss verifies during the scan
+*/
+void kmp_cpu (unsigned char *text, int text_size, unsigned char *pattern, int pattern_size, int *lps, int *match_result) {
+
+    int i, j;
+    compute_lps(pattern, pattern_size, lps);
 
     // Compare the strings now
     i = 0;
@@ -161,6 +173,118 @@ void kmp_cpu (unsigned char *text, int text_size, unsigned char *pattern, int pa
         if (j == pattern_size) {
             match_result[i-j] = 1;
             j = lps[j-1];
+        } 
+    }
+}
+
+
+/* Simple KMP implementation for GPU execution
+*  Every thread manages a substring of the text to scan
+*
+*  naive: no memory optmization involved
+*/
+__global__ void naive_kmp_gpu (unsigned char *text, int text_size, unsigned char *pattern, int pattern_size, int *lps, 
+                               int search_size, int *match_result) {
+
+    int i, j;
+    unsigned int index, pos_int_block, block_pos_grid;
+    unsigned int text_index;
+
+    // Thread index
+    pos_int_block = threadIdx.x + threadIdx.y * blockDim.x;
+    block_pos_grid = (blockIdx.y * gridDim.x) + blockIdx.x;
+    index = pos_int_block + block_pos_grid * blockDim.y * blockDim.x;
+    text_index = search_size * index;
+
+    // Compare the strings now
+    i = text_index;
+    j = 0;
+    while ((i < (text_index + search_size + pattern_size - 1)) && (text_size - i) >= (pattern_size - j)) {
+
+        // Increase indexes if they keep matching
+        if (pattern[j] == text[i]) {
+            i++;
+            j++;
+        }
+        // When they don't match, try comparing the previous LPS string against the new character
+        else if (i < text_size && pattern[j] != text[i]) {
+            if (j != 0)
+                j = lps[j - 1];
+            else
+                i = i + 1;
+        }
+
+        /* When pattern is entirely evaluated against the text and a match has been found
+        *  Move back to the previous LPS to avoid re-comparing old characters
+        */
+        if (j == pattern_size) {
+            match_result[i-j] = 1;
+            j = lps[j-1];
+        } 
+    }
+}
+
+
+/* Simple KMP implementation for GPU execution
+*  Every thread manages a substring of the text to scan
+*
+*  Memory optimizations involved
+*  Shared memory used for pattern and lps access time reduction
+*/
+__global__ void kmp_gpu (unsigned char *text, int text_size, unsigned char *pattern, int pattern_size, int *lps, 
+                         int search_size, int *match_result) {
+                            
+    __shared__ unsigned char local_pattern[MAX_PATTERN_LENGTH];
+    __shared__ int local_lps[MAX_PATTERN_LENGTH];
+
+    int i, j, copy_amount, copy_index;
+    unsigned int index, pos_int_block, block_pos_grid;
+    unsigned int text_index;
+
+    // Thread index
+    pos_int_block = threadIdx.x + threadIdx.y * blockDim.x;
+    block_pos_grid = (blockIdx.y * gridDim.x) + blockIdx.x;
+    index = pos_int_block + block_pos_grid * blockDim.y * blockDim.x;
+    text_index = search_size * index;
+
+    // Copy to shared memory both pattern and LPS table
+    copy_amount = ceil(pattern_size / (blockDim.x * blockDim.y)) + 1;
+    for (int m = 0; (m < copy_amount) && ((index * copy_amount + m) < pattern_size); m++) {
+        copy_index = index * copy_amount + m;
+        local_pattern[copy_index] = pattern[copy_index];
+        local_lps[copy_index] = lps[copy_index];
+        //printf("Thread: %d\tBlockX: %d\tBlockY: %d\tCI: %d\t%c\n", index, blockIdx.x, blockIdx.y, copy_index, local_pattern[copy_index]);
+    }
+    __syncthreads();
+
+    // if (index == 0)
+    //     for (int m = 0; m < MAX_PATTERN_LENGTH; m++)
+    //         printf("%d", local_lps[m]);
+
+    // Compare the strings now
+    i = text_index;
+    j = 0;
+    while ((i < (text_index + search_size + pattern_size - 1)) && (text_size - i) >= (pattern_size - j)) {
+
+        // Increase indexes if they keep matching
+        if (local_pattern[j] == text[i]) {
+            i++;
+            j++;
+        }
+        // When they don't match, try comparing the previous LPS string against the new character
+        else if (i < text_size && local_pattern[j] != text[i]) {
+            if (j != 0)
+                j = local_lps[j - 1];
+            else
+                i = i + 1;
+        }
+
+        /* When pattern is entirely evaluated against the text and a match has been found
+        *  Move back to the previous LPS to avoid re-comparing old characters
+        */
+        if (j == pattern_size) {
+            match_result[i-j] = 1;
+            j = local_lps[j-1];
         } 
     }
 }

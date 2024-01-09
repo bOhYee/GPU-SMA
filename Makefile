@@ -6,7 +6,7 @@ SRC_DIR = ./src
 OBJ_DIR = ./obj
 
 CC = nvcc
-FLAGS = -I$(INC_DIR)
+FLAGS = -I$(INC_DIR) --expt-relaxed-constexpr
 
 DEPS_NAMES = smatch.h
 DEPS = $(patsubst %, $(INC_DIR)/%, $(DEPS_NAMES))

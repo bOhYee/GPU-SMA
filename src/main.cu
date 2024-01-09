@@ -8,6 +8,10 @@
 #include "../inc/constants.h"
 #include "../inc/smatch.h"
 
+// TEMP
+const int ALGO = KMP;
+
+
 /* Prototypes
 */
 int read_text (char *file_path, unsigned char *storage);
@@ -72,11 +76,11 @@ int main (int argc, char *argv[]) {
     }
 
     printf("Launching the algorithm on the host device (CPU)...\n");
-    cpu_call(1, text, text_size, pattern, pattern_size, results);
+    cpu_call(ALGO, text, text_size, pattern, pattern_size, results);
     evaluate_result(results, text_size, pattern_size);
 
     printf("Launching the algorithm on the device (GPU)...\n");
-    gpu_call(1, text, text_size, pattern, pattern_size, results);
+    gpu_call(ALGO, text, text_size, pattern, pattern_size, results);
     evaluate_result(results, text_size, pattern_size);
 
     // Release memory
@@ -84,7 +88,8 @@ int main (int argc, char *argv[]) {
     return 0;
 }
 
-// Copy the text from the file inside the memory
+/* Copy the text from the file inside the memory
+*/
 int read_text (char *file_path, unsigned char *storage) {
 
     int i;
@@ -104,10 +109,9 @@ void cpu_call (int algorithm, unsigned char *text, int text_size, unsigned char 
 
     int *lps = NULL;
     double diff;
+
     time_t start;
-    
     start = time(NULL);
-    printf("test: %f", start);
 
     switch (algorithm) {
         case NAIVE_RK:
@@ -134,10 +138,15 @@ void cpu_call (int algorithm, unsigned char *text, int text_size, unsigned char 
 
 }
 
+/* Code for the GPU algorithm calls
+
+*  Some parts, especially inside the switch statement, may seem redundant but it is designed 
+*  in this way to allow more flexibility in case some calls require it
+*/
 void gpu_call (int algorithm, unsigned char *text, int text_size, unsigned char *pattern, int pattern_size, int *results) {
 
     int grid_size_x, grid_size_y, block_size_x, block_size_y, subtext_num;
-    int *gpu_results;
+    int *lps, *gpu_lps, *gpu_results;
     float elaboration_time;
     unsigned char *gpu_text, *gpu_pattern;
     cudaEvent_t start, end;
@@ -153,6 +162,23 @@ void gpu_call (int algorithm, unsigned char *text, int text_size, unsigned char 
             *  The higher the value of g, the higher will be the time required by each thread to complete the search
             */
             subtext_num = ceil(text_size / GRANULARITY_RK) + 1;
+
+            block_size_x = BLOCK_DIMENSION;
+            block_size_y = BLOCK_DIMENSION;
+
+            grid_size_x = ceil(sqrt(subtext_num / (block_size_x * block_size_y))) + 1;
+            grid_size_y = grid_size_x;
+            break;
+
+        case NAIVE_KMP:
+        case KMP:
+            /* Used to define the granularity required from the RK-algorithm
+            *  g = TEXT_SIZE / SUBTEXTS_NUM
+            *  
+            *  The lower the value of g, the more threads are required to analyze everything
+            *  The higher the value of g, the higher will be the time required by each thread to complete the search
+            */
+            subtext_num = ceil(text_size / GRANULARITY_KMP) + 1;
 
             block_size_x = BLOCK_DIMENSION;
             block_size_y = BLOCK_DIMENSION;
@@ -188,7 +214,6 @@ void gpu_call (int algorithm, unsigned char *text, int text_size, unsigned char 
     printf("Launching the kernel...\n");
     switch (algorithm) {
         case NAIVE_RK:
-        default:
             cudaMalloc((void **) &gpu_results, (text_size-pattern_size) * sizeof(int));
 
             cudaEventRecord(start);
@@ -197,6 +222,51 @@ void gpu_call (int algorithm, unsigned char *text, int text_size, unsigned char 
             cudaEventSynchronize(end);
 
             cudaMemcpy(results, gpu_results, (text_size-pattern_size) * sizeof(int), cudaMemcpyDeviceToHost);
+            break;
+
+        case NAIVE_KMP:
+            lps = (int *) malloc(pattern_size * sizeof(int));
+            if (lps == NULL) {
+                fprintf(stderr, "Error during memory allocation of LPS vector in device code!\n");
+                exit(EXIT_FAILURE);
+            }
+
+            compute_lps(pattern, pattern_size, lps);
+            cudaMalloc((void **) &gpu_lps, pattern_size * sizeof(unsigned int));
+            cudaMalloc((void **) &gpu_results, (text_size-pattern_size) * sizeof(int));
+            cudaMemcpy(gpu_lps, lps, pattern_size * sizeof(int), cudaMemcpyHostToDevice);
+
+            cudaEventRecord(start);
+            naive_kmp_gpu<<<gridDimension, blockDimension>>>(gpu_text, text_size, gpu_pattern, pattern_size, gpu_lps, GRANULARITY_KMP, gpu_results);
+            cudaEventRecord(end);
+            cudaEventSynchronize(end);
+
+            cudaMemcpy(results, gpu_results, (text_size-pattern_size) * sizeof(int), cudaMemcpyDeviceToHost);
+            free(lps);
+            break;
+
+        case KMP:
+            lps = (int *) malloc(pattern_size * sizeof(int));
+            if (lps == NULL) {
+                fprintf(stderr, "Error during memory allocation of LPS vector in device code!\n");
+                exit(EXIT_FAILURE);
+            }
+
+            compute_lps(pattern, pattern_size, lps);
+            cudaMalloc((void **) &gpu_lps, pattern_size * sizeof(unsigned int));
+            cudaMalloc((void **) &gpu_results, (text_size-pattern_size) * sizeof(int));
+            cudaMemcpy(gpu_lps, lps, pattern_size * sizeof(int), cudaMemcpyHostToDevice);
+
+            cudaEventRecord(start);
+            kmp_gpu<<<gridDimension, blockDimension>>>(gpu_text, text_size, gpu_pattern, pattern_size, gpu_lps, GRANULARITY_KMP, gpu_results);
+            cudaEventRecord(end);
+            cudaEventSynchronize(end);
+
+            cudaMemcpy(results, gpu_results, (text_size-pattern_size) * sizeof(int), cudaMemcpyDeviceToHost);
+            free(lps);
+            break;
+
+        default:
             break;
     }
 
