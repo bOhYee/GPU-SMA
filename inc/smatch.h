@@ -40,3 +40,10 @@ __global__ void naive_kmp_gpu (unsigned char *text, int text_size, unsigned char
 *  Shared memory used for pattern and lps access time reduction
 */
 __global__ void kmp_gpu (unsigned char *text, int text_size, unsigned char *pattern, int pattern_size, int *lps, int search_size, int *match_result);
+
+/* Simple string matching algorithm
+*  Every thread scans a string of length m to see if there are matches
+*
+*  Memory sharing is involved for optimization purposes
+*/
+__global__ void rk_gpu (unsigned char *text, int text_size, unsigned char *pattern, int pattern_size, int search_size, int *match_result);

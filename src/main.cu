@@ -9,7 +9,7 @@
 #include "../inc/smatch.h"
 
 // TEMP
-const int ALGO = KMP;
+const int ALGO = RK;
 
 
 /* Prototypes
@@ -18,6 +18,7 @@ int read_text (char *file_path, unsigned char *storage);
 void cpu_call (int algorithm, unsigned char *text, int text_size, unsigned char *pattern, int pattern_size, int *results);
 void gpu_call (int algorithm, unsigned char *text, int text_size, unsigned char *pattern, int pattern_size, int *results);
 int evaluate_result(int *results, int text_size, int pattern_size);
+void print_gpu_properties();
 
 int main (int argc, char *argv[]) {
 
@@ -75,6 +76,7 @@ int main (int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     }
 
+    print_gpu_properties();
     printf("Launching the algorithm on the host device (CPU)...\n");
     cpu_call(ALGO, text, text_size, pattern, pattern_size, results);
     evaluate_result(results, text_size, pattern_size);
@@ -87,6 +89,7 @@ int main (int argc, char *argv[]) {
     free(text);
     return 0;
 }
+
 
 /* Copy the text from the file inside the memory
 */
@@ -104,6 +107,7 @@ int read_text (char *file_path, unsigned char *storage) {
 
     return 0;
 }
+
 
 void cpu_call (int algorithm, unsigned char *text, int text_size, unsigned char *pattern, int pattern_size, int *results) {
 
@@ -138,6 +142,7 @@ void cpu_call (int algorithm, unsigned char *text, int text_size, unsigned char 
 
 }
 
+
 /* Code for the GPU algorithm calls
 
 *  Some parts, especially inside the switch statement, may seem redundant but it is designed 
@@ -155,6 +160,7 @@ void gpu_call (int algorithm, unsigned char *text, int text_size, unsigned char 
     printf("Defining grid and block dimensions...\n");
     switch (algorithm) {
         case NAIVE_RK:
+        case RK:
             /* Used to define the granularity required from the RK-algorithm
             *  g = TEXT_SIZE / SUBTEXTS_NUM
             *  
@@ -223,6 +229,17 @@ void gpu_call (int algorithm, unsigned char *text, int text_size, unsigned char 
 
             cudaMemcpy(results, gpu_results, (text_size-pattern_size) * sizeof(int), cudaMemcpyDeviceToHost);
             break;
+        
+        case RK:
+            cudaMalloc((void **) &gpu_results, (text_size-pattern_size) * sizeof(int));
+
+            cudaEventRecord(start);
+            rk_gpu<<<gridDimension, blockDimension>>>(gpu_text, text_size, gpu_pattern, pattern_size, GRANULARITY_RK, gpu_results);
+            cudaEventRecord(end);
+            cudaEventSynchronize(end);
+
+            cudaMemcpy(results, gpu_results, (text_size-pattern_size) * sizeof(int), cudaMemcpyDeviceToHost);
+            break;
 
         case NAIVE_KMP:
             lps = (int *) malloc(pattern_size * sizeof(int));
@@ -279,7 +296,9 @@ void gpu_call (int algorithm, unsigned char *text, int text_size, unsigned char 
     cudaEventDestroy(end);
 }
 
-// Evaluate the results obtained
+
+/* Evaluate the results obtained
+*/ 
 int evaluate_result(int *results, int text_size, int pattern_size) {
 
     int matches = 0;
@@ -299,4 +318,21 @@ int evaluate_result(int *results, int text_size, int pattern_size) {
         results[i] = 0;
         
     return matches;
+}
+
+
+/* Prints informations about the CUDA device to use
+*/
+void print_gpu_properties() {
+
+    cudaDeviceProp p;
+    cudaGetDeviceProperties(&p, 0);
+
+    printf("Printing CUDA device informations...\n");
+    printf("Amount of Global memory (bytes):\t%lu\n", p.totalGlobalMem);
+    printf("Amount of Shared memory per block (bytes):\t%lu\n", p.sharedMemPerBlock);
+    printf("Amount of Constant memory (bytes):\t%lu\n", p.totalConstMem);
+    printf("Number of SM:\t%d\n", p.multiProcessorCount);
+    printf("\n");
+
 }

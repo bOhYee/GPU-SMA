@@ -108,6 +108,74 @@ __global__ void naive_rk_gpu (unsigned char *text, int text_size, unsigned char 
 }
 
 
+/* Simple string matching algorithm
+*  Every thread scans a string of length m to see if there are matches
+*
+*  Memory sharing is involved for optimization purposes
+*/
+__global__ void rk_gpu (unsigned char *text, int text_size, unsigned char *pattern, int pattern_size,
+                        int search_size, int *match_result) {
+
+    __shared__ unsigned char local_pattern[MAX_PATTERN_LENGTH];
+    unsigned int index, pos_int_block, block_pos_grid;
+    unsigned int text_index;
+
+    int hash_text, hash_pattern, h, found;
+    int copy_amount, copy_index;
+
+    pos_int_block = threadIdx.x + threadIdx.y * blockDim.x;
+    block_pos_grid = (blockIdx.y * gridDim.x) + blockIdx.x;
+    index = pos_int_block + block_pos_grid * blockDim.y * blockDim.x;
+    text_index = search_size * index;
+
+    // Copy to shared memory the pattern for better access times
+    copy_amount = ceil(pattern_size / (blockDim.x * blockDim.y)) + 1;
+    for (int m = 0; m < copy_amount; m++) {
+        copy_index = (index * copy_amount + m) % pattern_size;
+        local_pattern[copy_index] = pattern[copy_index];
+        //printf("Thread: %d\tBlockX: %d\tBlockY: %d\tCI: %d\t%c\n", index, blockIdx.x, blockIdx.y, copy_index, local_pattern[copy_index]);
+    }
+    __syncthreads();
+
+    // Hash the first text window and pattern
+    hash_text = 0;
+    hash_pattern = 0;
+    for (int i = 0; i < pattern_size; i++) {
+        hash_pattern = (ALPHABET_SIZE * hash_pattern + local_pattern[i]) % OVERFLOW_PM;
+        hash_text = (ALPHABET_SIZE * hash_text + text[text_index + i]) % OVERFLOW_PM;
+    }
+
+    // Computation of h = ALPHABET_SIZE ^ (PATTERN_SIZE-1)
+    h = 1;
+    for (int i = 0; i < pattern_size-1; i++) 
+        h = (h * ALPHABET_SIZE) % OVERFLOW_PM;
+
+    for (int i = 0; (i < search_size) && ((text_index + i) < (text_size - pattern_size + 1)); i++) {
+        //printf("Thread: %d\tIndex: %d\n", index, search_size);
+
+        // If the hashes are equal, most likely a hit but a check is required
+        found = 0;
+        if (hash_pattern == hash_text) {
+            found = 1;
+
+            for (int j = 0; j < pattern_size; j++)
+                if (local_pattern[j] != text[text_index + i + j])
+                    found = 0;
+        }
+
+        // Save result
+        match_result[text_index + i] = found;
+
+        // Prepare next text window hash
+        if (i < text_size - pattern_size)
+            hash_text = (ALPHABET_SIZE * (hash_text - text[text_index+i] * h) + text[text_index+i+pattern_size]) % OVERFLOW_PM;
+
+        if (hash_text < 0)
+            hash_text += OVERFLOW_PM;
+    }
+}
+
+
 /* Longest Proper Suffix calculation function
 *  Used by the KMP algorithm to avoid useless comparisons between operands
 */
@@ -249,17 +317,13 @@ __global__ void kmp_gpu (unsigned char *text, int text_size, unsigned char *patt
 
     // Copy to shared memory both pattern and LPS table
     copy_amount = ceil(pattern_size / (blockDim.x * blockDim.y)) + 1;
-    for (int m = 0; (m < copy_amount) && ((index * copy_amount + m) < pattern_size); m++) {
-        copy_index = index * copy_amount + m;
+    for (int m = 0; m < copy_amount; m++) {
+        copy_index = (index * copy_amount + m) % pattern_size;
         local_pattern[copy_index] = pattern[copy_index];
         local_lps[copy_index] = lps[copy_index];
         //printf("Thread: %d\tBlockX: %d\tBlockY: %d\tCI: %d\t%c\n", index, blockIdx.x, blockIdx.y, copy_index, local_pattern[copy_index]);
     }
     __syncthreads();
-
-    // if (index == 0)
-    //     for (int m = 0; m < MAX_PATTERN_LENGTH; m++)
-    //         printf("%d", local_lps[m]);
 
     // Compare the strings now
     i = text_index;
