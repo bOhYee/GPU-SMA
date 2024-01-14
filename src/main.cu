@@ -9,7 +9,7 @@
 #include "../inc/smatch.h"
 
 // TEMP
-const int ALGO = RK;
+const int ALGO = KMP;
 
 
 /* Prototypes
@@ -59,7 +59,7 @@ int main (int argc, char *argv[]) {
         pattern = stat_pattern;
     }
 
-    results = (int*) malloc((text_size - pattern_size) * sizeof(int));
+    results = (int*) malloc(text_size * sizeof(int));
 
     if (text == NULL || pattern == NULL || results == NULL) {
         fprintf(stderr, "Error during memory allocation!\n");
@@ -150,14 +150,21 @@ void cpu_call (int algorithm, unsigned char *text, int text_size, unsigned char 
 */
 void gpu_call (int algorithm, unsigned char *text, int text_size, unsigned char *pattern, int pattern_size, int *results) {
 
+    int stream_size, text_stream_size;
+    float elaboration_time[MAX_NUM_STREAM];
+
     int grid_size_x, grid_size_y, block_size_x, block_size_y, subtext_num;
     int *lps, *gpu_lps, *gpu_results;
-    float elaboration_time;
     unsigned char *gpu_text, *gpu_pattern;
+
+    cudaStream_t stream[MAX_NUM_STREAM];
     cudaEvent_t start, end;
 
     // Kernel parameters definition
     printf("Defining grid and block dimensions...\n");
+    block_size_x = BLOCK_DIMENSION;
+    block_size_y = BLOCK_DIMENSION;
+
     switch (algorithm) {
         case NAIVE_RK:
         case RK:
@@ -167,13 +174,7 @@ void gpu_call (int algorithm, unsigned char *text, int text_size, unsigned char 
             *  The lower the value of g, the more threads are required to analyze everything
             *  The higher the value of g, the higher will be the time required by each thread to complete the search
             */
-            subtext_num = ceil(text_size / GRANULARITY_RK) + 1;
-
-            block_size_x = BLOCK_DIMENSION;
-            block_size_y = BLOCK_DIMENSION;
-
-            grid_size_x = ceil(sqrt(subtext_num / (block_size_x * block_size_y))) + 1;
-            grid_size_y = grid_size_x;
+            subtext_num = ceil(text_size / (MAX_NUM_STREAM * GRANULARITY_RK)) + 1;
             break;
 
         case NAIVE_KMP:
@@ -184,28 +185,27 @@ void gpu_call (int algorithm, unsigned char *text, int text_size, unsigned char 
             *  The lower the value of g, the more threads are required to analyze everything
             *  The higher the value of g, the higher will be the time required by each thread to complete the search
             */
-            subtext_num = ceil(text_size / GRANULARITY_KMP) + 1;
-
-            block_size_x = BLOCK_DIMENSION;
-            block_size_y = BLOCK_DIMENSION;
-
-            grid_size_x = ceil(sqrt(subtext_num / (block_size_x * block_size_y))) + 1;
-            grid_size_y = grid_size_x;
+            subtext_num = ceil(text_size / (MAX_NUM_STREAM * GRANULARITY_KMP)) + 1;
             break;
 
         default:
-            block_size_x = BLOCK_DIMENSION;
-            block_size_y = BLOCK_DIMENSION;
-
-            grid_size_x = ceil(sqrt(text_size / (block_size_x * block_size_y))) + 1;
-            grid_size_y = grid_size_x;
+            fprintf(stderr, "Error: chosen algorithm not supported!\n");
+            exit(EXIT_FAILURE);
             break;
     }
+
+    grid_size_x = ceil(sqrt(subtext_num / (block_size_x * block_size_y))) + 1;
+    grid_size_y = grid_size_x;
 
     dim3 gridDimension(grid_size_x, grid_size_y);
     dim3 blockDimension(block_size_x, block_size_y);
     printf("Text size: %d bytes\nPattern size: %d bytes\n", text_size, pattern_size);
-    printf("Grid: %dx%d\nBlocks: %dx%d\n\n", grid_size_x, grid_size_y, block_size_x, block_size_y);
+    printf("Stream allocated: %d\n", MAX_NUM_STREAM);
+    printf("Grid (per stream): %dx%d\nBlocks: %dx%d\n\n", grid_size_x, grid_size_y, block_size_x, block_size_y);
+
+    // Streams
+    for (int i = 0; i < MAX_NUM_STREAM; i++)
+        cudaStreamCreate(&stream[i]);
 
     // Events
     cudaEventCreate(&start);
@@ -214,54 +214,38 @@ void gpu_call (int algorithm, unsigned char *text, int text_size, unsigned char 
     // GPU allocations and copy
     cudaMalloc((void **) &gpu_text, text_size * sizeof(unsigned char));
     cudaMalloc((void **) &gpu_pattern, pattern_size * sizeof(unsigned char));
-    cudaMemcpy(gpu_text, text, text_size * sizeof(unsigned char), cudaMemcpyHostToDevice);
+    cudaMalloc((void **) &gpu_results, text_size * sizeof(int));
     cudaMemcpy(gpu_pattern, pattern, pattern_size * sizeof(unsigned char), cudaMemcpyHostToDevice);
 
-    printf("Launching the kernel...\n");
+    stream_size = text_size / MAX_NUM_STREAM;
+    text_stream_size = stream_size + pattern_size;
+                
     switch (algorithm) {
-        case NAIVE_RK:
-            cudaMalloc((void **) &gpu_results, (text_size-pattern_size) * sizeof(int));
-
-            cudaEventRecord(start);
-            naive_rk_gpu<<<gridDimension, blockDimension>>>(gpu_text, text_size, gpu_pattern, pattern_size, GRANULARITY_RK, gpu_results);
-            cudaEventRecord(end);
-            cudaEventSynchronize(end);
-
-            cudaMemcpy(results, gpu_results, (text_size-pattern_size) * sizeof(int), cudaMemcpyDeviceToHost);
-            break;
-        
+        case NAIVE_RK:        
         case RK:
-            cudaMalloc((void **) &gpu_results, (text_size-pattern_size) * sizeof(int));
+            for (int i = 0; i < MAX_NUM_STREAM; i++) {
+                printf("Launching the kernel using stream %d...\n", i);
 
-            cudaEventRecord(start);
-            rk_gpu<<<gridDimension, blockDimension>>>(gpu_text, text_size, gpu_pattern, pattern_size, GRANULARITY_RK, gpu_results);
-            cudaEventRecord(end);
-            cudaEventSynchronize(end);
+                /* On the last round, make some adjustment for incorrect memory management due
+                *  to rounding errors
+                */
+                if (i == MAX_NUM_STREAM - 1)
+                    text_stream_size = text_size - i * stream_size;
 
-            cudaMemcpy(results, gpu_results, (text_size-pattern_size) * sizeof(int), cudaMemcpyDeviceToHost);
+                cudaMemcpyAsync(gpu_text + i * stream_size, text + i * stream_size, text_stream_size * sizeof(unsigned char), cudaMemcpyHostToDevice, stream[i]);
+
+                if (algorithm == NAIVE_RK)
+                    naive_rk_gpu<<<gridDimension, blockDimension, 0, stream[i]>>>(gpu_text + i * stream_size, text_stream_size, gpu_pattern, pattern_size, GRANULARITY_RK, gpu_results + i * stream_size);
+                else
+                    rk_gpu<<<gridDimension, blockDimension, 0, stream[i]>>>(gpu_text + i * stream_size, text_stream_size, gpu_pattern, pattern_size, GRANULARITY_RK, gpu_results + i * stream_size);
+                
+                cudaMemcpyAsync(results + i * stream_size, gpu_results + i * stream_size, text_stream_size * sizeof(int), cudaMemcpyDeviceToHost, stream[i]);
+            }
+            
+            cudaDeviceSynchronize();
             break;
 
         case NAIVE_KMP:
-            lps = (int *) malloc(pattern_size * sizeof(int));
-            if (lps == NULL) {
-                fprintf(stderr, "Error during memory allocation of LPS vector in device code!\n");
-                exit(EXIT_FAILURE);
-            }
-
-            compute_lps(pattern, pattern_size, lps);
-            cudaMalloc((void **) &gpu_lps, pattern_size * sizeof(unsigned int));
-            cudaMalloc((void **) &gpu_results, (text_size-pattern_size) * sizeof(int));
-            cudaMemcpy(gpu_lps, lps, pattern_size * sizeof(int), cudaMemcpyHostToDevice);
-
-            cudaEventRecord(start);
-            naive_kmp_gpu<<<gridDimension, blockDimension>>>(gpu_text, text_size, gpu_pattern, pattern_size, gpu_lps, GRANULARITY_KMP, gpu_results);
-            cudaEventRecord(end);
-            cudaEventSynchronize(end);
-
-            cudaMemcpy(results, gpu_results, (text_size-pattern_size) * sizeof(int), cudaMemcpyDeviceToHost);
-            free(lps);
-            break;
-
         case KMP:
             lps = (int *) malloc(pattern_size * sizeof(int));
             if (lps == NULL) {
@@ -271,29 +255,56 @@ void gpu_call (int algorithm, unsigned char *text, int text_size, unsigned char 
 
             compute_lps(pattern, pattern_size, lps);
             cudaMalloc((void **) &gpu_lps, pattern_size * sizeof(unsigned int));
-            cudaMalloc((void **) &gpu_results, (text_size-pattern_size) * sizeof(int));
             cudaMemcpy(gpu_lps, lps, pattern_size * sizeof(int), cudaMemcpyHostToDevice);
 
-            cudaEventRecord(start);
-            kmp_gpu<<<gridDimension, blockDimension>>>(gpu_text, text_size, gpu_pattern, pattern_size, gpu_lps, GRANULARITY_KMP, gpu_results);
-            cudaEventRecord(end);
-            cudaEventSynchronize(end);
+            for (int i = 0; i < MAX_NUM_STREAM; i++) {             
+                printf("Launching the kernel using stream %d...\n", i);
 
-            cudaMemcpy(results, gpu_results, (text_size-pattern_size) * sizeof(int), cudaMemcpyDeviceToHost);
+                /* On the last round, make some adjustment for incorrect memory management due
+                *  to rounding errors
+                */
+                if (i == MAX_NUM_STREAM - 1)
+                    text_stream_size = text_size - i * stream_size;
+
+                cudaMemcpyAsync(gpu_text + i * stream_size, text + i * stream_size, text_stream_size * sizeof(unsigned char), cudaMemcpyHostToDevice, stream[i]);
+
+                if (algorithm == NAIVE_KMP)
+                    naive_kmp_gpu<<<gridDimension, blockDimension, 0, stream[i]>>>(gpu_text + i * stream_size, text_stream_size, gpu_pattern, pattern_size, gpu_lps, GRANULARITY_KMP, gpu_results + i * stream_size);
+                else
+                    kmp_gpu<<<gridDimension, blockDimension, 0, stream[i]>>>(gpu_text + i * stream_size, text_size, gpu_pattern, pattern_size, gpu_lps, GRANULARITY_KMP, gpu_results + i * stream_size);
+                    
+                cudaMemcpyAsync(results + i * stream_size, gpu_results + i * stream_size, text_stream_size * sizeof(int), cudaMemcpyDeviceToHost, stream[i]);
+            }
+
+            cudaDeviceSynchronize();
             free(lps);
             break;
 
         default:
+            fprintf(stderr, "Error: chosen algorithm not supported!\n");
+            exit(EXIT_FAILURE);
             break;
     }
 
-    // Compute time for elaboration
-    cudaEventElapsedTime(&elaboration_time, start, end);
-    elaboration_time /= 1000;
-    printf("Kernel operations terminated in %f seconds\n", elaboration_time);
 
+    // Compute time for elaboration
+    //cudaEventElapsedTime(&elaboration_time, start, end);
+    //elaboration_time /= 1000;
+    //printf("Kernel operations terminated in %f seconds\n", elaboration_time);
+
+    // Streams
+    for (int i = 0; i < MAX_NUM_STREAM; i++)
+        cudaStreamDestroy(stream[i]);
+
+    // Events
     cudaEventDestroy(start);
     cudaEventDestroy(end);
+
+    // Free GPU memory
+    cudaFree(gpu_text);
+    cudaFree(gpu_pattern);
+    cudaFree(gpu_results);
+    cudaFree(gpu_lps);
 }
 
 
@@ -304,7 +315,7 @@ int evaluate_result(int *results, int text_size, int pattern_size) {
     int matches = 0;
     printf("\n");
 
-    for (int i = 0; i < (text_size - pattern_size); i++){
+    for (int i = 0; i < (text_size - pattern_size + 1); i++){
         if (results[i] == 1){
             matches++;
             printf("Match found at index: %d\n", i+1);
@@ -329,10 +340,12 @@ void print_gpu_properties() {
     cudaGetDeviceProperties(&p, 0);
 
     printf("Printing CUDA device informations...\n");
-    printf("Amount of Global memory (bytes):\t%lu\n", p.totalGlobalMem);
-    printf("Amount of Shared memory per block (bytes):\t%lu\n", p.sharedMemPerBlock);
-    printf("Amount of Constant memory (bytes):\t%lu\n", p.totalConstMem);
-    printf("Number of SM:\t%d\n", p.multiProcessorCount);
+    printf("Device name:\t\t\t\t\t\t%s\n", p.name);
+    printf("Amount of Global memory (bytes):\t\t\t%lu\n", p.totalGlobalMem);
+    printf("Maximum amount of Shared memory per block (bytes):\t%lu\n", p.sharedMemPerBlock);
+    printf("Amount of Constant memory (bytes):\t\t\t%lu\n", p.totalConstMem);
+    printf("Number of SM:\t\t\t\t\t\t%d\n", p.multiProcessorCount);
+    printf("Concurrent kernels supported:\t\t\t\t%d\n", p.concurrentKernels);
     printf("\n");
 
 }

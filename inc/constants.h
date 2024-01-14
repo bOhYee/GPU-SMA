@@ -19,12 +19,13 @@
 *
 *  Constraint: it should be at least >= 1, otherwise no thread works
 */ 
-#define GRANULARITY_RK  10
-#define GRANULARITY_KMP 150
+#define GRANULARITY_RK  100
+#define GRANULARITY_KMP 100
 
 /* GPU parameters definition
 */
 #define BLOCK_DIMENSION 16
+#define MAX_NUM_STREAM 8
 
 /* Algorithms that can be chosen for test runs
 */
