@@ -29,4 +29,4 @@
 
 /* Algorithms that can be chosen for test runs
 */
-enum algo { NAIVE_RK = 1, RK = 2, NAIVE_KMP = 3, KMP = 4 };
+enum algo { NAIVE_RK = 1, RK = 2, NAIVE_KMP = 3, KMP = 4, NAIVE_BM = 5, BM = 6 };

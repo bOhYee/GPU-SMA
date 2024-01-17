@@ -1,8 +1,12 @@
+/* General parameters
+*/
+#define ALPHABET_SIZE 256       // Alphabet size for every algorithm
+
 /* Parameters for the Rabin-Karp algorithm
 */
-#define ALPHABET_SIZE 256       // Alphabet size for hashing-based algorithms
 #define OVERFLOW_PM 101         // Prime number used for overflow containment operations
 
+/* Rabin-Karp */
 /* Rabin-Karp algorithm for CPU execution
 *  Makes use of hashes to easily verify if two strings are equal
 */
@@ -22,6 +26,8 @@ __global__ void naive_rk_gpu (unsigned char *text, int text_size, unsigned char 
 */
 __global__ void rk_gpu (unsigned char *text, int text_size, unsigned char *pattern, int pattern_size, int search_size, int *match_result);
 
+
+/* KMP */
 /* Longest Proper Suffix calculation function
 *  Used by the KMP algorithm to avoid useless comparisons between operands
 */
@@ -47,3 +53,30 @@ __global__ void naive_kmp_gpu (unsigned char *text, int text_size, unsigned char
 *  Shared memory used for pattern and lps access time reduction
 */
 __global__ void kmp_gpu (unsigned char *text, int text_size, unsigned char *pattern, int pattern_size, int *lps, int search_size, int *match_result);
+
+
+/* Boyer-Moore */
+/* Bad character rule implementation for Boyer-Moore algorithm
+*/
+void bad_char_rule(int *bshifts, unsigned char *pattern, int pattern_size);
+
+/* Check if a certain string is a prefix
+*  Returns true if the suffix of pattern starting from pattern[pos] is also a prefix of pattern
+*/ 
+int is_prefix(unsigned char *pattern, int pattern_size, int pos);
+
+/* Returns the length of the longest suffix of pattern ending on pattern[pos]
+*/ 
+int suffix_length(unsigned char *pattern, int pattern_size, int pos);
+
+/* Good suffix rule implementation for Boyer-Moore algorithm
+*  Strong version, as implemented by Dan Gusfield
+*/
+void good_suffix_rule(int *gshifts, unsigned char *pattern, int pattern_size);
+
+/* Boyer-Moore algorithm for string matching
+*  Tries to skip as many characters as possible by following two different rules:
+*      - bad character rule;
+*      - good suffix rule.
+*/
+void boyer_moore_cpu (unsigned char *text, int text_size, unsigned char *pattern, int pattern_size, int *bshifts, int *gshifts, int *match_result);

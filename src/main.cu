@@ -9,7 +9,7 @@
 #include "../inc/smatch.h"
 
 // TEMP
-const int ALGO = KMP;
+const int ALGO = NAIVE_BM;
 
 
 /* Prototypes
@@ -82,7 +82,7 @@ int main (int argc, char *argv[]) {
     evaluate_result(results, text_size, pattern_size);
 
     printf("Launching the algorithm on the device (GPU)...\n");
-    gpu_call(ALGO, text, text_size, pattern, pattern_size, results);
+    //gpu_call(ALGO, text, text_size, pattern, pattern_size, results);
     evaluate_result(results, text_size, pattern_size);
 
     // Release memory
@@ -111,10 +111,13 @@ int read_text (char *file_path, unsigned char *storage) {
 
 void cpu_call (int algorithm, unsigned char *text, int text_size, unsigned char *pattern, int pattern_size, int *results) {
 
-    int *lps = NULL;
+    int *lps, *bshifts, *gshifts;
     double diff;
-
     time_t start;
+
+    lps = NULL;
+    bshifts = NULL;
+    gshifts = NULL;
     start = time(NULL);
 
     switch (algorithm) {
@@ -125,7 +128,6 @@ void cpu_call (int algorithm, unsigned char *text, int text_size, unsigned char 
         
         case NAIVE_KMP:
         case KMP:
-        default:
             lps = (int *) malloc(pattern_size * sizeof(int));
             if (lps == NULL) {
                 fprintf(stderr, "Error during memory allocation of LPS vector!\n");
@@ -134,6 +136,25 @@ void cpu_call (int algorithm, unsigned char *text, int text_size, unsigned char 
             
             kmp_cpu(text, text_size, pattern, pattern_size, lps, results);
             free(lps);
+            break;
+
+        case NAIVE_BM:
+        case BM:
+            bshifts = (int *) malloc(ALPHABET_SIZE * sizeof(int));
+            gshifts = (int *) malloc(pattern_size * sizeof(int));
+            if (bshifts == NULL || gshifts == NULL) {
+                fprintf(stderr, "Error during memory allocation of BadCharacterRule or GoodSuffixRule vectors!\n");
+                exit(EXIT_FAILURE);
+            }
+
+            boyer_moore_cpu(text, text_size, pattern, pattern_size, bshifts, gshifts, results);
+            free(bshifts);
+            free(gshifts);
+            break;
+
+        default:
+            fprintf(stderr, "Error: chosen algorithm not supported!\n");
+            exit(EXIT_FAILURE);
             break;
     }
 
@@ -325,7 +346,7 @@ int evaluate_result(int *results, int text_size, int pattern_size) {
     printf("Total matches: %d\n\n", matches);
 
     // Reset the results array after scanning it
-    for (int i = 0; i < (text_size - pattern_size); i++)
+    for (int i = 0; i < (text_size - pattern_size + 1); i++)
         results[i] = 0;
         
     return matches;

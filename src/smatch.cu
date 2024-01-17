@@ -356,3 +356,112 @@ __global__ void kmp_gpu (unsigned char *text, int text_size, unsigned char *patt
         } 
     }
 }
+
+
+
+/* Bad character rule implementation for Boyer-Moore algorithm
+*/
+void bad_char_rule(int *bshifts, unsigned char *pattern, int pattern_size) {
+
+    for (int i = 0; i < ALPHABET_SIZE; i++)
+        bshifts[i] = -1;
+
+    for (int i = 0; i < pattern_size - 1; i++) 
+        bshifts[(int) pattern[i]] = pattern_size - 1 - i;
+
+}
+
+
+/* Check if a certain string is a prefix
+*  Returns true if the suffix of pattern starting from pattern[pos] is also a prefix of pattern
+*/ 
+int is_prefix(unsigned char *pattern, int pattern_size, int pos) {
+
+    int suffixlen = pattern_size - pos;
+
+    for (int i = 0; i < suffixlen; i++) 
+        if (pattern[i] != pattern[pos+i])
+            return 0;
+            
+    return 1;
+}
+
+
+/* Returns the length of the longest suffix of pattern ending on pattern[pos]
+*/ 
+int suffix_length(unsigned char *pattern, int pattern_size, int pos) {
+
+    int i;
+    
+    // Increment suffix length i to the first mismatch or beginning of the word
+    for (i = 0; (pattern[pos-i] == pattern[pattern_size-1-i]) && (i < pos); i++);
+    
+    return i;
+}
+
+
+/* Good suffix rule implementation for Boyer-Moore algorithm
+*  Strong version, as implemented by Dan Gusfield
+*/
+void good_suffix_rule(int *gshifts, unsigned char *pattern, int pattern_size) {
+
+    int slen;
+    int last_prefix_index = 1;
+
+    // Prefix pattern
+    for (int p = pattern_size - 1; p >= 0; p--) {
+        if (is_prefix(pattern, pattern_size, p+1))
+            last_prefix_index = p+1;
+
+        gshifts[p] = (pattern_size-1 - p) + last_prefix_index;
+    }
+
+    // Suffix pattern
+    for (int p = 0; p < pattern_size - 1; p++) {
+        slen = suffix_length(pattern, pattern_size, p);
+
+        if (pattern[p - slen] != pattern[pattern_size-1 - slen])
+            gshifts[pattern_size-1 - slen] = pattern_size-1 - p + slen;
+    }
+
+}
+
+
+/* Boyer-Moore algorithm for string matching
+*  Tries to skip as many characters as possible by following two different rules:
+*      - bad character rule;
+*      - good suffix rule.
+*/
+void boyer_moore_cpu (unsigned char *text, int text_size, unsigned char *pattern, int pattern_size, 
+                      int *bshifts, int *gshifts, int *match_result) {
+
+    int i = pattern_size - 1;
+    int j;
+    int n_shifts = 0;
+
+    // Preprocessing of the pattern string
+    bad_char_rule(bshifts, pattern, pattern_size);
+    good_suffix_rule(gshifts, pattern, pattern_size);
+    
+    while (i < text_size) {
+
+        j = pattern_size-1;
+
+        while (j >= 0 && (text[i] == pattern[j])) {
+            --i;
+            --j;
+        }
+
+        if (j < 0) {
+            match_result[++i] = 1;
+            i += gshifts[0];
+        }
+        else {
+            if (bshifts[text[i]] < gshifts[j])
+                i += gshifts[j];
+            else
+                i += bshifts[text[i]];
+        }
+    }
+    
+}
