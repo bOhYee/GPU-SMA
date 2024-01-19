@@ -9,7 +9,7 @@
 #include "../inc/smatch.h"
 
 // TEMP
-const int ALGO = BM;
+const int ALGO = NAIVE_BM;
 
 
 /* Prototypes
@@ -359,7 +359,7 @@ void gpu_call (int algorithm, unsigned char *text, int text_size, unsigned char 
                 cudaMemcpyAsync(gpu_text + i * stream_size, text + i * stream_size, text_stream_size * sizeof(unsigned char), cudaMemcpyHostToDevice, stream[i]);
 
                 if (algorithm == NAIVE_BM)
-                    boyer_moore_gpu<<<gridDimension, blockDimension, 0, stream[i]>>>(gpu_text + i * stream_size, text_stream_size, gpu_pattern, pattern_size, gpu_bshifts, gpu_gshifts, GRANULARITY_BM, gpu_results + i * stream_size);
+                    naive_boyer_moore_gpu<<<gridDimension, blockDimension, 0, stream[i]>>>(gpu_text + i * stream_size, text_stream_size, gpu_pattern, pattern_size, gpu_bshifts, gpu_gshifts, GRANULARITY_BM, gpu_results + i * stream_size);
                 else
                     boyer_moore_gpu<<<gridDimension, blockDimension, 0, stream[i]>>>(gpu_text + i * stream_size, text_stream_size, gpu_pattern, pattern_size, gpu_bshifts, gpu_gshifts, GRANULARITY_BM, gpu_results + i * stream_size);
                     

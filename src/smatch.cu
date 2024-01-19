@@ -467,6 +467,58 @@ void boyer_moore_cpu (unsigned char *text, int text_size, unsigned char *pattern
 }
 
 
+/* Naive version of the Boyer-Moore algorithm for string matching
+ * Tries to skip as many characters as possible by following two different rules:
+ *     - bad character rule;
+ *     - good suffix rule.
+ *
+ * Naive implementation of the algorithm
+ * No memory optimization
+ */
+__global__ void naive_boyer_moore_gpu (unsigned char *text, int text_size, unsigned char *pattern, int pattern_size, 
+                                       int *bshifts, int *gshifts, int search_size, int *match_result) {
+
+    int i, j, prev_i;
+    unsigned int index, pos_int_block, block_pos_grid;
+    unsigned int text_index;
+
+    // Thread index
+    pos_int_block = threadIdx.x + threadIdx.y * blockDim.x;
+    block_pos_grid = (blockIdx.y * gridDim.x) + blockIdx.x;
+    index = pos_int_block + block_pos_grid * blockDim.y * blockDim.x;
+    text_index = search_size * index;
+
+    // Search
+    i = text_index + pattern_size - 1;
+    while ((i >= text_index + pattern_size - 1) && (i < (text_index + search_size + pattern_size - 1)) && (i < text_size)) {
+
+        j = pattern_size - 1;
+
+        while (j >= 0 && (text[i] == pattern[j])){
+            --j;
+            --i;
+        }
+
+        if (j < 0) {
+            match_result[++i] = 1;
+            i += gshifts[0];
+        }
+        else {
+            prev_i = i;
+
+            if (bshifts[text[i]] < gshifts[j])
+                i += gshifts[j];
+            else
+                i += bshifts[text[i]];
+
+            // Avoid returning back to not encounter recursion over the same indexes
+            if (i <= prev_i)
+                i += pattern_size - 1;
+        }
+    }
+}
+
+
 /* Boyer-Moore algorithm for string matching
  * Tries to skip as many characters as possible by following two different rules:
  *     - bad character rule;
