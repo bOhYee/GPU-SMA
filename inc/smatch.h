@@ -80,3 +80,14 @@ void good_suffix_rule(int *gshifts, unsigned char *pattern, int pattern_size);
 *      - good suffix rule.
 */
 void boyer_moore_cpu (unsigned char *text, int text_size, unsigned char *pattern, int pattern_size, int *bshifts, int *gshifts, int *match_result);
+
+/* Boyer-Moore algorithm for string matching
+*  Tries to skip as many characters as possible by following two different rules:
+*      - bad character rule;
+*      - good suffix rule.
+*
+*  Implementation makes use of shared memory for storing pattern, the bad rule table and the good rule table
+*  Shared memory per block used = 5 * MAX_PATTERN_LENGTH + 4 * ALPHABET_SIZE bytes
+*  It might be too much for some architectures: in that case lowering the constants should help
+*/
+__global__ void boyer_moore_gpu (unsigned char *text, int text_size, unsigned char *pattern, int pattern_size, int *bshifts, int *gshifts, int search_size, int *match_result);

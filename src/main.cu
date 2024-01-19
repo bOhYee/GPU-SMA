@@ -9,24 +9,47 @@
 #include "../inc/smatch.h"
 
 // TEMP
-const int ALGO = NAIVE_BM;
+const int ALGO = BM;
 
 
 /* Prototypes
-*/
+ */
+void parse_args(int argc, char **argv, unsigned char **text, int *text_size, unsigned char **pattern, int *pattern_size, int **results);
 int read_text (char *file_path, unsigned char *storage);
 void cpu_call (int algorithm, unsigned char *text, int text_size, unsigned char *pattern, int pattern_size, int *results);
 void gpu_call (int algorithm, unsigned char *text, int text_size, unsigned char *pattern, int pattern_size, int *results);
 int evaluate_result(int *results, int text_size, int pattern_size);
 void print_gpu_properties();
 
+
 int main (int argc, char *argv[]) {
 
     int text_size, pattern_size;
     int *results;
-    unsigned char *text;
-    unsigned char *pattern;
-    unsigned char stat_pattern[] = "ipsum";
+    unsigned char *text, *pattern;
+
+    parse_args(argc, argv, &text, &text_size, &pattern, &pattern_size, &results);
+
+    print_gpu_properties();
+    printf("Launching the algorithm on the host device (CPU)...\n");
+    cpu_call(ALGO, text, text_size, pattern, pattern_size, results);
+    evaluate_result(results, text_size, pattern_size);
+
+    printf("Launching the algorithm on the device (GPU)...\n");
+    gpu_call(ALGO, text, text_size, pattern, pattern_size, results);
+    evaluate_result(results, text_size, pattern_size);
+
+    // Release memory
+    free(text);
+    free(pattern);
+    free(results);
+    return 0;
+}
+
+
+/* Parse the arguments provided by the command line interface
+ */
+void parse_args(int argc, char **argv, unsigned char **text, int *text_size, unsigned char **pattern, int *pattern_size, int **results) {
 
     struct stat text_info, pattern_info;
 
@@ -37,62 +60,52 @@ int main (int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     }
 
+    // TEXT to search
     if (stat(argv[1], &text_info) == -1) {
         fprintf(stderr, "Indicated path for text might not be correct\n");
         exit(EXIT_FAILURE);
     }
 
-    text_size = text_info.st_size;
-    text = (unsigned char*) malloc(text_size * sizeof(unsigned char));
+    *text_size = (int) text_info.st_size;
+    *text = (unsigned char*) malloc((*text_size) * sizeof(unsigned char));
 
+    // PATTERN to be searched
     if (argc == 3) {
         if (stat(argv[2], &pattern_info) == -1) {
             fprintf(stderr, "Indicated path for pattern might not be correct\n");
             exit(EXIT_FAILURE);
         }
     
-        pattern_size = pattern_info.st_size;
-        pattern = (unsigned char *) malloc(pattern_size * sizeof(unsigned char));    
+        *pattern_size = (int) pattern_info.st_size;
+        *pattern = (unsigned char *) malloc((*pattern_size) * sizeof(unsigned char));    
     }
     else {
-        pattern_size = strlen((char *) stat_pattern);
-        pattern = stat_pattern;
+        // PATTERN located inside CONST memory of device
+        *pattern_size = PATTERN_SIZE;
+        *pattern = NULL;
     }
 
-    results = (int*) malloc(text_size * sizeof(int));
+    *results = (int*) malloc((*text_size) * sizeof(int));
 
     if (text == NULL || pattern == NULL || results == NULL) {
         fprintf(stderr, "Error during memory allocation!\n");
         exit(EXIT_FAILURE);
     }
-    
-    if(read_text(argv[1], text) == 1) {
+
+    if(read_text(argv[1], *text) == 1) {
         fprintf(stderr, "Error during file reading!\n");
         exit(EXIT_FAILURE);
     }
 
-    if(argc == 3 && read_text(argv[2], pattern) == 1) {
+    if(argc == 3 && read_text(argv[2], *pattern) == 1) {
         fprintf(stderr, "Error during file reading!\n");
         exit(EXIT_FAILURE);
     }
-
-    print_gpu_properties();
-    printf("Launching the algorithm on the host device (CPU)...\n");
-    cpu_call(ALGO, text, text_size, pattern, pattern_size, results);
-    evaluate_result(results, text_size, pattern_size);
-
-    printf("Launching the algorithm on the device (GPU)...\n");
-    //gpu_call(ALGO, text, text_size, pattern, pattern_size, results);
-    evaluate_result(results, text_size, pattern_size);
-
-    // Release memory
-    free(text);
-    return 0;
 }
 
 
 /* Copy the text from the file inside the memory
-*/
+ */
 int read_text (char *file_path, unsigned char *storage) {
 
     int i;
@@ -109,6 +122,8 @@ int read_text (char *file_path, unsigned char *storage) {
 }
 
 
+/* CPU execution of the SMA, for comparison with the GPU one
+ */
 void cpu_call (int algorithm, unsigned char *text, int text_size, unsigned char *pattern, int pattern_size, int *results) {
 
     int *lps, *bshifts, *gshifts;
@@ -165,17 +180,17 @@ void cpu_call (int algorithm, unsigned char *text, int text_size, unsigned char 
 
 
 /* Code for the GPU algorithm calls
-
-*  Some parts, especially inside the switch statement, may seem redundant but it is designed 
-*  in this way to allow more flexibility in case some calls require it
-*/
+ *
+ * Some parts, especially inside the switch statement, may seem redundant but it is designed 
+ * in this way to allow more flexibility in case some calls require it
+ */
 void gpu_call (int algorithm, unsigned char *text, int text_size, unsigned char *pattern, int pattern_size, int *results) {
 
     int stream_size, text_stream_size;
     float elaboration_time[MAX_NUM_STREAM];
 
     int grid_size_x, grid_size_y, block_size_x, block_size_y, subtext_num;
-    int *lps, *gpu_lps, *gpu_results;
+    int *lps, *gpu_lps, *bshifts, *gpu_bshifts, *gshifts, *gpu_gshifts, *gpu_results;
     unsigned char *gpu_text, *gpu_pattern;
 
     cudaStream_t stream[MAX_NUM_STREAM];
@@ -207,6 +222,17 @@ void gpu_call (int algorithm, unsigned char *text, int text_size, unsigned char 
             *  The higher the value of g, the higher will be the time required by each thread to complete the search
             */
             subtext_num = ceil(text_size / (MAX_NUM_STREAM * GRANULARITY_KMP)) + 1;
+            break;
+
+        case NAIVE_BM:
+        case BM:
+            /* Used to define the granularity required from the RK-algorithm
+            *  g = TEXT_SIZE / SUBTEXTS_NUM
+            *  
+            *  The lower the value of g, the more threads are required to analyze everything
+            *  The higher the value of g, the higher will be the time required by each thread to complete the search
+            */
+            subtext_num = ceil(text_size / (MAX_NUM_STREAM * GRANULARITY_BM)) + 1;
             break;
 
         default:
@@ -292,13 +318,57 @@ void gpu_call (int algorithm, unsigned char *text, int text_size, unsigned char 
                 if (algorithm == NAIVE_KMP)
                     naive_kmp_gpu<<<gridDimension, blockDimension, 0, stream[i]>>>(gpu_text + i * stream_size, text_stream_size, gpu_pattern, pattern_size, gpu_lps, GRANULARITY_KMP, gpu_results + i * stream_size);
                 else
-                    kmp_gpu<<<gridDimension, blockDimension, 0, stream[i]>>>(gpu_text + i * stream_size, text_size, gpu_pattern, pattern_size, gpu_lps, GRANULARITY_KMP, gpu_results + i * stream_size);
+                    kmp_gpu<<<gridDimension, blockDimension, 0, stream[i]>>>(gpu_text + i * stream_size, text_stream_size, gpu_pattern, pattern_size, gpu_lps, GRANULARITY_KMP, gpu_results + i * stream_size);
                     
                 cudaMemcpyAsync(results + i * stream_size, gpu_results + i * stream_size, text_stream_size * sizeof(int), cudaMemcpyDeviceToHost, stream[i]);
             }
 
             cudaDeviceSynchronize();
             free(lps);
+            break;
+        
+        case NAIVE_BM:
+        case BM:
+            bshifts = (int *) malloc(ALPHABET_SIZE * sizeof(int));
+            gshifts = (int *) malloc(pattern_size * sizeof(int));
+            if (bshifts == NULL || gshifts == NULL) {
+                fprintf(stderr, "Error during memory allocation of bad rule and good rule tables in device code!\n");
+                exit(EXIT_FAILURE);
+            }
+
+            /* Preprocessing not possibile on the device due to the high amount of possible bank conficts, even if divide and conquer approach used
+             *  Better to preprocess the patter using the CPU and leave only the search to the device
+             */ 
+            bad_char_rule(bshifts, pattern, pattern_size);
+            good_suffix_rule(gshifts, pattern, pattern_size);
+
+            cudaMalloc((void **) &gpu_bshifts, ALPHABET_SIZE * sizeof(unsigned int));
+            cudaMalloc((void **) &gpu_gshifts, pattern_size * sizeof(unsigned int));
+            cudaMemcpy(gpu_bshifts, bshifts, ALPHABET_SIZE * sizeof(int), cudaMemcpyHostToDevice);
+            cudaMemcpy(gpu_gshifts, gshifts, pattern_size * sizeof(int), cudaMemcpyHostToDevice);    
+
+            for (int i = 0; i < MAX_NUM_STREAM; i++) {             
+                printf("Launching the kernel using stream %d...\n", i);
+
+                /* On the last round, make some adjustment for incorrect memory management due
+                 *  to rounding errors
+                 */
+                if (i == MAX_NUM_STREAM - 1)
+                    text_stream_size = text_size - i * stream_size;
+
+                cudaMemcpyAsync(gpu_text + i * stream_size, text + i * stream_size, text_stream_size * sizeof(unsigned char), cudaMemcpyHostToDevice, stream[i]);
+
+                if (algorithm == NAIVE_BM)
+                    boyer_moore_gpu<<<gridDimension, blockDimension, 0, stream[i]>>>(gpu_text + i * stream_size, text_stream_size, gpu_pattern, pattern_size, gpu_bshifts, gpu_gshifts, GRANULARITY_BM, gpu_results + i * stream_size);
+                else
+                    boyer_moore_gpu<<<gridDimension, blockDimension, 0, stream[i]>>>(gpu_text + i * stream_size, text_stream_size, gpu_pattern, pattern_size, gpu_bshifts, gpu_gshifts, GRANULARITY_BM, gpu_results + i * stream_size);
+                    
+                cudaMemcpyAsync(results + i * stream_size, gpu_results + i * stream_size, text_stream_size * sizeof(int), cudaMemcpyDeviceToHost, stream[i]);
+            }
+
+            cudaDeviceSynchronize();
+            free(bshifts);
+            free(gshifts);
             break;
 
         default:
@@ -326,6 +396,8 @@ void gpu_call (int algorithm, unsigned char *text, int text_size, unsigned char 
     cudaFree(gpu_pattern);
     cudaFree(gpu_results);
     cudaFree(gpu_lps);
+    cudaFree(gpu_bshifts);
+    cudaFree(gpu_gshifts);
 }
 
 

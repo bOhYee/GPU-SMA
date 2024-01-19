@@ -21,6 +21,7 @@
 */ 
 #define GRANULARITY_RK  100
 #define GRANULARITY_KMP 100
+#define GRANULARITY_BM  100
 
 /* GPU parameters definition
 */
