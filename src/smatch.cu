@@ -478,7 +478,7 @@ void boyer_moore_cpu (unsigned char *text, int text_size, unsigned char *pattern
 __global__ void naive_boyer_moore_gpu (unsigned char *text, int text_size, unsigned char *pattern, int pattern_size, 
                                        int *bshifts, int *gshifts, int search_size, int *match_result) {
 
-    int i, j, prev_i;
+    int i, j, prev_i, starting_i;
     unsigned int index, pos_int_block, block_pos_grid;
     unsigned int text_index;
 
@@ -493,6 +493,7 @@ __global__ void naive_boyer_moore_gpu (unsigned char *text, int text_size, unsig
     while ((i >= text_index + pattern_size - 1) && (i < (text_index + search_size + pattern_size - 1)) && (i < text_size)) {
 
         j = pattern_size - 1;
+        starting_i = i;
 
         while (j >= 0 && (text[i] == pattern[j])){
             --j;
@@ -513,7 +514,7 @@ __global__ void naive_boyer_moore_gpu (unsigned char *text, int text_size, unsig
 
             // Avoid returning back to not encounter recursion over the same indexes
             if (i <= prev_i)
-                i += pattern_size - 1;
+                i = starting_i + 1;
         }
     }
 }
@@ -531,11 +532,12 @@ __global__ void naive_boyer_moore_gpu (unsigned char *text, int text_size, unsig
 __global__ void boyer_moore_gpu (unsigned char *text, int text_size, unsigned char *pattern, int pattern_size, 
                                  int *bshifts, int *gshifts, int search_size, int *match_result) {
 
-    __shared__ unsigned char local_pattern[MAX_PATTERN_LENGTH];
     __shared__ unsigned int  local_bshifts[ALPHABET_SIZE];
     __shared__ unsigned int  local_gshifts[MAX_PATTERN_LENGTH];
+    __shared__ unsigned char local_pattern[MAX_PATTERN_LENGTH];
 
-    int i, j, copy_amount, start_over_shift, copy_index, prev_i;
+    int i, j, prev_i, starting_i;
+    int copy_amount, start_over_shift, copy_index;
     unsigned int index, pos_int_block, block_pos_grid;
     unsigned int text_index;
 
@@ -556,14 +558,15 @@ __global__ void boyer_moore_gpu (unsigned char *text, int text_size, unsigned ch
         //printf("Thread: %d\tBlockX: %d\tBlockY: %d\tCI: %d\t%d\n", index, blockIdx.x, blockIdx.y, copy_index, local_gshifts[copy_index]);
     }
     __syncthreads();
-    
+
     i = text_index + pattern_size - 1;
-    start_over_shift = local_gshifts[0];
+    start_over_shift = gshifts[0];
 
     // Search
     while ((i >= text_index + pattern_size - 1) && (i < (text_index + search_size + pattern_size - 1)) && (i < text_size)) {
 
         j = pattern_size - 1;
+        starting_i = i;
 
         while (j >= 0 && (text[i] == local_pattern[j])){
             --j;
@@ -584,7 +587,7 @@ __global__ void boyer_moore_gpu (unsigned char *text, int text_size, unsigned ch
 
             // Avoid returning back to not encounter recursion over the same indexes
             if (i <= prev_i)
-                i += pattern_size - 1;
+                i = starting_i + 1;
         }
     }
 }

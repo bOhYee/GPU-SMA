@@ -26,7 +26,7 @@
 /* GPU parameters definition
  */
 #define BLOCK_DIMENSION 16
-#define MAX_NUM_STREAM 8
+#define MAX_NUM_STREAM 5
 
 /* Algorithms that can be chosen for test runs
  */
