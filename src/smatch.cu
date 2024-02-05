@@ -219,7 +219,7 @@ void kmp_cpu (unsigned char *text, int text_size, unsigned char *pattern, int pa
 
     int i, j;
     compute_lps(pattern, pattern_size, lps);
-
+    
     // Compare the strings now
     i = 0;
     j = 0;

@@ -3,10 +3,11 @@
  */
 #define PATTERN_LOCATION 2
 
-/* Pattern length
- * Used when this is statically defined
+/* Maximum pattern number
+ * Used to define maximum amount of pattern that can be searched concurrently 
+ * Statically defined to maximize throughput
  */
-#define PATTERN_SIZE 5
+#define MAX_PATTERN_NUMBER 8
 
 /* Maximum pattern length for string matching
  * Needed for defining how much storage to prepare inside the shared memory
