@@ -8,9 +8,6 @@
 #include "../inc/constants.h"
 #include "../inc/smatch.h"
 
-// TEMP
-const int ALGO = KMP;
-
 
 /* Prototypes
  */
@@ -18,7 +15,8 @@ void parse_args(int argc, char **argv, unsigned char **text, int *text_size, uns
 int read_text (char *file_path, unsigned char *storage);
 int read_patterns (char *file_path, unsigned char **pattern, int *pattern_size, int *pattern_number);
 void cpu_call (int algorithm, unsigned char *text, int text_size, unsigned char *pattern, int pattern_size, int *results);
-void gpu_call (int algorithm, int granularity, int stream_num, unsigned char *text, int text_size, unsigned char *pattern, int pattern_size, int *results);
+void gpu_onept_call (int algorithm, int granularity, int stream_num, unsigned char *text, int text_size, unsigned char *pattern, int pattern_size, int *results);
+void gpu_multipt_call (int granularity, unsigned char *text, int text_size, unsigned char **pattern, int *pattern_size, int pattern_number, int **results);
 int evaluate_result(int *results, int text_size, int pattern_size);
 void print_gpu_properties();
 void read_program_parameters(int *chs_algo, int *chs_g, int *chs_stream_num, int pattern_number);
@@ -56,8 +54,14 @@ int main (int argc, char *argv[]) {
     printf("Launching the algorithm on the device (GPU)...\n");
     printf("##############################################\n");
     if (pattern_number == 1) {
-        gpu_call(chs_algo, chs_g, chs_stream_num, text, text_size, pattern[0], pattern_size[0], results[0]);
+        gpu_onept_call(chs_algo, chs_g, chs_stream_num, text, text_size, pattern[0], pattern_size[0], results[0]);
         evaluate_result(results[0], text_size, pattern_size[0]);
+    } 
+    else {
+        gpu_multipt_call(chs_g, text, text_size, pattern, pattern_size, pattern_number, results);
+
+        for (int i = 0; i < pattern_number; i++)
+            evaluate_result(results[i], text_size, pattern_size[i]);
     }
 
     // Release memory
@@ -237,12 +241,12 @@ void cpu_call (int algorithm, unsigned char *text, int text_size, unsigned char 
 }
 
 
-/* Code for the GPU algorithm calls
+/* Code for the GPU algorithm calls (Single-Pattern)
  *
- * Some parts, especially inside the switch statement, may seem redundant but it is designed 
- * in this way to allow more flexibility in case some calls require it
+ * Works only for one pattern only. For multi-pattern search, see the gpu_multipt_call method
+ * Designed to allow more flexibility during extensions
  */
-void gpu_call (int algorithm, int granularity, int stream_num, unsigned char *text, int text_size, unsigned char *pattern, int pattern_size, int *results) {
+void gpu_onept_call (int algorithm, int granularity, int stream_num, unsigned char *text, int text_size, unsigned char *pattern, int pattern_size, int *results) {
 
     int stream_size, text_stream_size;
     float elaboration_time[MAX_NUM_STREAM];
@@ -272,6 +276,7 @@ void gpu_call (int algorithm, int granularity, int stream_num, unsigned char *te
     dim3 gridDimension(grid_size_x, grid_size_y);
     dim3 blockDimension(block_size_x, block_size_y);
     printf("Text size: %d bytes\nPattern size: %d bytes\n", text_size, pattern_size);
+    printf("Granularity: %d\nSubtext's number: %d\n", granularity, subtext_num);
     printf("Stream allocated: %d\n", stream_num);
     printf("Grid (per stream): %dx%d\nBlocks: %dx%d\n\n", grid_size_x, grid_size_y, block_size_x, block_size_y);
 
@@ -291,8 +296,8 @@ void gpu_call (int algorithm, int granularity, int stream_num, unsigned char *te
     cudaMemcpy(gpu_pattern, pattern, pattern_size * sizeof(unsigned char), cudaMemcpyHostToDevice);
 
     stream_size = text_size / stream_num;
-    text_stream_size = stream_size + pattern_size;
-                
+    text_stream_size = stream_size + pattern_size;    
+            
     switch (algorithm) {
         case NAIVE_RK:        
         case RK:
@@ -316,6 +321,7 @@ void gpu_call (int algorithm, int granularity, int stream_num, unsigned char *te
             }
             
             cudaDeviceSynchronize();
+            printf("\nTemp: %d", results[4042788]);
             break;
 
         case NAIVE_KMP:
@@ -428,6 +434,78 @@ void gpu_call (int algorithm, int granularity, int stream_num, unsigned char *te
 }
 
 
+/* Code for the GPU algorithm calls (Multi-Pattern)
+ *
+ * Called only when multiple pattern have to be searched. Single pattern search is performed by the gpu_onept_call method.
+ * Only RK is supported for simplicity in memory allocation and management
+ */
+void gpu_multipt_call (int granularity, unsigned char *text, int text_size, unsigned char **pattern, int *pattern_size, int pattern_number, int **results) {
+
+    int grid_size_x, grid_size_y, subtext_num, pt_stream;
+    int *gpu_results;
+    unsigned char *gpu_text, *gpu_pattern;
+
+    cudaStream_t stream[MAX_MULTIPT_STREAM];
+    cudaEvent_t start, end;
+
+    // Kernel parameters definition
+    printf("Defining grid and block dimensions...\n");
+    subtext_num = ceil(text_size / granularity) + 1;
+    grid_size_x = ceil(sqrt(subtext_num / (BLOCK_DIMENSION * BLOCK_DIMENSION))) + 1;
+    grid_size_y = grid_size_x;
+
+    dim3 gridDimension(grid_size_x, grid_size_y);
+    dim3 blockDimension(BLOCK_DIMENSION, BLOCK_DIMENSION);
+    printf("Text size: %d bytes\n", text_size);
+    for (int i = 0; i < pattern_number; i++) 
+        printf("Pattern #%d size: %d bytes\n", i+1, pattern_size[i]);
+
+    printf("Granularity: %d\nSubtext's number: %d\n", granularity, subtext_num);
+    printf("Stream allocated: %d\n", MAX_MULTIPT_STREAM);
+    printf("Grid (per stream): %dx%d\nBlocks: %dx%d\n\n", grid_size_x, grid_size_y, BLOCK_DIMENSION, BLOCK_DIMENSION);
+
+    // Streams
+    for (int i = 0; i < MAX_MULTIPT_STREAM; i++)
+        cudaStreamCreate(&stream[i]);
+
+    // Events
+    cudaEventCreate(&start);
+    cudaEventCreate(&end);
+
+    // GPU allocations and copy
+    cudaMalloc((void **) &gpu_text, text_size * sizeof(unsigned char));
+    cudaMemcpy(gpu_text, text, text_size * sizeof(unsigned char), cudaMemcpyHostToDevice);
+    cudaMalloc((void **) &gpu_pattern, pattern_number * MAX_PATTERN_LENGTH * sizeof(unsigned char));
+    cudaMalloc((void **) &gpu_results, pattern_number * text_size * sizeof(int));
+
+    // Kernel launch
+    for (int i = 0; i < pattern_number; i++) {
+        pt_stream = i % MAX_MULTIPT_STREAM;
+        printf("Launching the kernel for pattern %d using stream %d...\n", i+1, pt_stream);
+        
+        cudaMemcpyAsync(gpu_pattern + i * MAX_PATTERN_LENGTH, pattern[i], pattern_size[i] * sizeof(unsigned char), cudaMemcpyHostToDevice, stream[pt_stream]);
+        rk_gpu<<<gridDimension, blockDimension, 0, stream[pt_stream]>>>(gpu_text, text_size, gpu_pattern + i * MAX_PATTERN_LENGTH, pattern_size[i], granularity, gpu_results + i * text_size);
+        cudaMemcpyAsync(results[i], gpu_results + i * text_size, text_size * sizeof(int), cudaMemcpyDeviceToHost, stream[pt_stream]);
+    }
+    cudaDeviceSynchronize();
+         
+    // Streams
+    for (int i = 0; i < MAX_MULTIPT_STREAM; i++)
+        cudaStreamDestroy(stream[i]);
+
+    // Events
+    cudaEventDestroy(start);
+    cudaEventDestroy(end);
+
+    // Free GPU memory
+    cudaFree(gpu_pattern);
+    cudaFree(gpu_results);
+    cudaFree(gpu_text);
+    cudaFree(gpu_pattern);
+    cudaFree(gpu_results);
+}
+
+
 /* Evaluate the results obtained
 */ 
 int evaluate_result(int *results, int text_size, int pattern_size) {
@@ -477,19 +555,24 @@ void read_program_parameters(int *chs_algo, int *chs_g, int *chs_stream_num, int
 
     char line[10];
 
-    printf("Choose the algorithm to execute: \n");
-    printf("1) Rabin Karp (naive implementation);\n");
-    printf("2) Rabin Karp (optimized);\n");
-    printf("3) KMP (naive implementation);\n");
-    printf("4) KMP (optimized);\n");
-    printf("5) Boyer-Moore (naive implementation);\n");
-    printf("6) Boyer-Moore (optimized);\n: ");
-    fgets(line, 10, stdin);
-    *chs_algo = strtol(line, NULL, 10);
+    if (pattern_number == 1) {
+        printf("Choose the algorithm to execute: \n");
+        printf("1) Rabin Karp (naive implementation);\n");
+        printf("2) Rabin Karp (optimized);\n");
+        printf("3) KMP (naive implementation);\n");
+        printf("4) KMP (optimized);\n");
+        printf("5) Boyer-Moore (naive implementation);\n");
+        printf("6) Boyer-Moore (optimized);\n: ");
+        fgets(line, 10, stdin);
+        *chs_algo = strtol(line, NULL, 10);
 
-    if (*chs_algo <= 0 || *chs_algo >= 7) {
-        fprintf(stderr, "Inserted value is incorrect!\nValue must be a number between 1 and 6. Aborting operations...\n");
-        exit(EXIT_FAILURE);
+        if (*chs_algo <= 0 || *chs_algo >= 7) {
+            fprintf(stderr, "Inserted value is incorrect!\nValue must be a number between 1 and 6. Aborting operations...\n");
+            exit(EXIT_FAILURE);
+        }
+    } 
+    else {
+        *chs_algo = RK;
     }
 
     if ((*chs_algo % 2 == 0) && (pattern_number == 1)) {

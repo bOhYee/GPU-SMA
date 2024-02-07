@@ -1,20 +1,24 @@
 /* Location where the pattern to search is defined/stored
+ *
  * 1 - Constant memory; 2 - Read from stdin or defined in main function
  */
 #define PATTERN_LOCATION 2
 
 /* Maximum pattern number
+ * 
  * Used to define maximum amount of pattern that can be searched concurrently 
  * Statically defined to maximize throughput
  */
 #define MAX_PATTERN_NUMBER 8
 
 /* Maximum pattern length for string matching
+ *
  * Needed for defining how much storage to prepare inside the shared memory
  */
 #define MAX_PATTERN_LENGTH 800
 
 /* Granularity represents how long the sequence each thread has to scan is
+ *
  * It affects how much a single thread work
  * Its value also affects the parallelization factor of the GPU
  * 
@@ -28,6 +32,7 @@
  */
 #define BLOCK_DIMENSION 16
 #define MAX_NUM_STREAM 5
+#define MAX_MULTIPT_STREAM 8
 
 /* Algorithms that can be chosen for test runs
  */

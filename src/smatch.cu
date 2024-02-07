@@ -123,8 +123,9 @@ __global__ void rk_gpu (unsigned char *text, int text_size, unsigned char *patte
     unsigned int index, pos_int_block, block_pos_grid;
     unsigned int text_index;
 
-    int hash_text, hash_pattern, h, found;
+    int hash_text, hash_pattern, h;
     int copy_amount, copy_index;
+    int found = 0;
 
     pos_int_block = threadIdx.x + threadIdx.y * blockDim.x;
     block_pos_grid = (blockIdx.y * gridDim.x) + blockIdx.x;
@@ -133,6 +134,7 @@ __global__ void rk_gpu (unsigned char *text, int text_size, unsigned char *patte
 
     // Copy to shared memory the pattern for better access times
     copy_amount = ceil(pattern_size / (blockDim.x * blockDim.y)) + 1;
+
     for (int m = 0; m < copy_amount; m++) {
         copy_index = (index * copy_amount + m) % pattern_size;
         local_pattern[copy_index] = pattern[copy_index];
@@ -154,7 +156,7 @@ __global__ void rk_gpu (unsigned char *text, int text_size, unsigned char *patte
         h = (h * ALPHABET_SIZE) % OVERFLOW_PM;
 
     for (int i = 0; (i < search_size) && ((text_index + i) < (text_size - pattern_size + 1)); i++) {
-        //printf("Thread: %d\tIndex: %d\n", index, search_size);
+        // printf("Thread: %d\tIndex: %d\t %d\n", index, search_size, text_index + i);
 
         // If the hashes are equal, most likely a hit but a check is required
         found = 0;
