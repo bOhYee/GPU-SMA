@@ -1,8 +1,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
-#include <time.h>
 #include <string.h>
+#include <sys/time.h>
 #include <sys/stat.h>
 
 #include "../inc/constants.h"
@@ -65,7 +65,7 @@ int main (int argc, char *argv[]) {
     }
 
     // Release memory
-    for (int i = 0; i < MAX_PATTERN_NUMBER; i++){
+    for (int i = 0; i < pattern_number; i++){
         free(pattern[i]);
         free(results[i]);
     }
@@ -82,6 +82,8 @@ int main (int argc, char *argv[]) {
  */
 void parse_args(int argc, char **argv, unsigned char **text, int *text_size, unsigned char ***pattern, int **pattern_size, int *pattern_number, int ***results) {
 
+    int *loc_patsize, **loc_res;            // Used for better readability of allocations
+    unsigned char **loc_pat;                // Used for better readability of allocations
     struct stat text_info, pattern_info;
 
     // Verify parameters
@@ -105,22 +107,13 @@ void parse_args(int argc, char **argv, unsigned char **text, int *text_size, uns
 
     *text_size = (int) text_info.st_size;
     *text = (unsigned char*) malloc((*text_size) * sizeof(unsigned char));
-    *results = (int**) malloc(MAX_PATTERN_NUMBER * sizeof(int*));
-    *pattern_size = (int *) malloc((MAX_PATTERN_NUMBER) * sizeof(int));
-    *pattern = (unsigned char **) malloc((MAX_PATTERN_NUMBER) * sizeof(unsigned char*));
 
-    if (text == NULL || pattern == NULL || pattern_size == NULL || results == NULL) {
+    loc_patsize = (int *) malloc((MAX_PATTERN_NUMBER) * sizeof(int));
+    loc_pat = (unsigned char **) malloc((MAX_PATTERN_NUMBER) * sizeof(unsigned char *));
+
+    if (text == NULL || loc_pat == NULL || loc_patsize == NULL) {
         fprintf(stderr, "Error during memory allocation!\n");
         exit(EXIT_FAILURE);
-    }
-
-    for (int i = 0; i < MAX_PATTERN_NUMBER; i++) {
-        (*results)[i] = (int*) malloc((*text_size) * sizeof(int));
-        
-        if ((*results)[i] == NULL) {
-            fprintf(stderr, "Error during memory allocation!\n");
-            exit(EXIT_FAILURE);
-        }
     }
 
     // Read the files after allocation
@@ -129,10 +122,30 @@ void parse_args(int argc, char **argv, unsigned char **text, int *text_size, uns
         exit(EXIT_FAILURE);
     }
 
-    if(read_patterns(argv[2], *pattern, *pattern_size, pattern_number) == 1) {
+    if(read_patterns(argv[2], loc_pat, loc_patsize, pattern_number) == 1) {
         fprintf(stderr, "Error during file reading!\n");
         exit(EXIT_FAILURE);
     }
+
+    // Allocate results
+    loc_res = (int **) malloc((*pattern_number) * sizeof(int *));
+    if (loc_res == NULL) {
+        fprintf(stderr, "Error during memory allocation!\n");
+        exit(EXIT_FAILURE);
+    }
+
+    for (int i = 0; i < (*pattern_number); i++) {
+        loc_res[i] = (int *) malloc((*text_size) * sizeof(int));
+        
+        if (loc_res[i] == NULL) {
+            fprintf(stderr, "Error during memory allocation!\n");
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    *pattern = loc_pat;
+    *pattern_size = loc_patsize;
+    *results = loc_res;
 }
 
 
@@ -169,18 +182,21 @@ int read_patterns (char *file_path, unsigned char **pattern, int *pattern_size, 
     i = 0;
     pt = NULL;
     while ((read = getline(&pt, (size_t *) &pt_len, in_file)) != -1 && i < MAX_PATTERN_NUMBER) {
-        pattern[i] = (unsigned char *) malloc((read-1) * sizeof(unsigned char));
+        pattern[i] = (unsigned char *) malloc(read * sizeof(unsigned char));
         if(pattern[i] == NULL) {
             fprintf(stderr, "Error during memory allocation!\n");
             exit(EXIT_FAILURE);
         }
 
-        memcpy(pattern[i], pt, read-1);
-        pattern_size[i] = read - 1;       
+        memcpy(pattern[i], pt, read);
+        pattern_size[i] = read;       
         i++;
     }
     
     *pattern_number = i;
+    for (int j = 0; j < i-1; j++)
+        pattern_size[j]--;
+
     return 0;
 }
 
@@ -191,12 +207,12 @@ void cpu_call (int algorithm, unsigned char *text, int text_size, unsigned char 
 
     int *lps, *bshifts, *gshifts;
     double diff;
-    time_t start;
+    struct timeval start, end;
 
     lps = NULL;
     bshifts = NULL;
     gshifts = NULL;
-    start = time(NULL);
+    gettimeofday(&start, 0);
 
     switch (algorithm) {
         case NAIVE_RK:
@@ -236,8 +252,9 @@ void cpu_call (int algorithm, unsigned char *text, int text_size, unsigned char 
             break;
     }
 
-    diff = difftime(time(NULL), start);
-   // printf("Operations terminated in %f seconds.\n", diff);
+    gettimeofday(&end, 0);
+    diff = (1000000.0 * (end.tv_sec - start.tv_sec) + end.tv_usec - start.tv_usec) / 1000.0;
+    printf("Operations terminated in %f ms.\n", diff);
 }
 
 
@@ -249,14 +266,14 @@ void cpu_call (int algorithm, unsigned char *text, int text_size, unsigned char 
 void gpu_onept_call (int algorithm, int granularity, int stream_num, unsigned char *text, int text_size, unsigned char *pattern, int pattern_size, int *results) {
 
     int stream_size, text_stream_size;
-    float elaboration_time[MAX_NUM_STREAM];
+    float elaboration_time;
 
     int grid_size_x, grid_size_y, block_size_x, block_size_y, subtext_num;
     int *lps, *gpu_lps, *bshifts, *gpu_bshifts, *gshifts, *gpu_gshifts, *gpu_results;
     unsigned char *gpu_text, *gpu_pattern;
 
     cudaStream_t *stream;
-    cudaEvent_t start, end;
+    cudaEvent_t *start, *end;
 
     // Kernel parameters definition
     printf("Defining grid and block dimensions...\n");
@@ -280,14 +297,15 @@ void gpu_onept_call (int algorithm, int granularity, int stream_num, unsigned ch
     printf("Stream allocated: %d\n", stream_num);
     printf("Grid (per stream): %dx%d\nBlocks: %dx%d\n\n", grid_size_x, grid_size_y, block_size_x, block_size_y);
 
-    // Streams
+    // Streams & Events
     stream = (cudaStream_t *) malloc(stream_num * sizeof(cudaStream_t));
-    for (int i = 0; i < stream_num; i++)
+    start = (cudaEvent_t *) malloc(stream_num * sizeof(cudaEvent_t));
+    end = (cudaEvent_t *) malloc(stream_num * sizeof(cudaEvent_t));
+    for (int i = 0; i < stream_num; i++) {
         cudaStreamCreate(&stream[i]);
-
-    // Events
-    cudaEventCreate(&start);
-    cudaEventCreate(&end);
+        cudaEventCreate(&(start[i]));
+        cudaEventCreate(&(end[i]));
+    }
 
     // GPU allocations and copy
     cudaMalloc((void **) &gpu_text, text_size * sizeof(unsigned char));
@@ -311,17 +329,18 @@ void gpu_onept_call (int algorithm, int granularity, int stream_num, unsigned ch
                     text_stream_size = text_size - i * stream_size;
 
                 cudaMemcpyAsync(gpu_text + i * stream_size, text + i * stream_size, text_stream_size * sizeof(unsigned char), cudaMemcpyHostToDevice, stream[i]);
+                cudaEventRecord(start[i], stream[i]);
 
                 if (algorithm == NAIVE_RK)
                     naive_rk_gpu<<<gridDimension, blockDimension, 0, stream[i]>>>(gpu_text + i * stream_size, text_stream_size, gpu_pattern, pattern_size, granularity, gpu_results + i * stream_size);
                 else
                     rk_gpu<<<gridDimension, blockDimension, 0, stream[i]>>>(gpu_text + i * stream_size, text_stream_size, gpu_pattern, pattern_size, granularity, gpu_results + i * stream_size);
                 
+                cudaEventRecord(end[i], stream[i]);
                 cudaMemcpyAsync(results + i * stream_size, gpu_results + i * stream_size, text_stream_size * sizeof(int), cudaMemcpyDeviceToHost, stream[i]);
             }
             
             cudaDeviceSynchronize();
-            printf("\nTemp: %d", results[4042788]);
             break;
 
         case NAIVE_KMP:
@@ -346,12 +365,14 @@ void gpu_onept_call (int algorithm, int granularity, int stream_num, unsigned ch
                     text_stream_size = text_size - i * stream_size;
 
                 cudaMemcpyAsync(gpu_text + i * stream_size, text + i * stream_size, text_stream_size * sizeof(unsigned char), cudaMemcpyHostToDevice, stream[i]);
+                cudaEventRecord(start[i], stream[i]);
 
                 if (algorithm == NAIVE_KMP)
                     naive_kmp_gpu<<<gridDimension, blockDimension, 0, stream[i]>>>(gpu_text + i * stream_size, text_stream_size, gpu_pattern, pattern_size, gpu_lps, granularity, gpu_results + i * stream_size);
                 else
                     kmp_gpu<<<gridDimension, blockDimension, 0, stream[i]>>>(gpu_text + i * stream_size, text_stream_size, gpu_pattern, pattern_size, gpu_lps, granularity, gpu_results + i * stream_size);
                     
+                cudaEventRecord(end[i], stream[i]);
                 cudaMemcpyAsync(results + i * stream_size, gpu_results + i * stream_size, text_stream_size * sizeof(int), cudaMemcpyDeviceToHost, stream[i]);
             }
 
@@ -389,12 +410,14 @@ void gpu_onept_call (int algorithm, int granularity, int stream_num, unsigned ch
                     text_stream_size = text_size - i * stream_size;
 
                 cudaMemcpyAsync(gpu_text + i * stream_size, text + i * stream_size, text_stream_size * sizeof(unsigned char), cudaMemcpyHostToDevice, stream[i]);
+                cudaEventRecord(start[i], stream[i]);
 
                 if (algorithm == NAIVE_BM)
                     naive_boyer_moore_gpu<<<gridDimension, blockDimension, 0, stream[i]>>>(gpu_text + i * stream_size, text_stream_size, gpu_pattern, pattern_size, gpu_bshifts, gpu_gshifts, granularity, gpu_results + i * stream_size);
                 else
                     boyer_moore_gpu<<<gridDimension, blockDimension, 0, stream[i]>>>(gpu_text + i * stream_size, text_stream_size, gpu_pattern, pattern_size, gpu_bshifts, gpu_gshifts, granularity, gpu_results + i * stream_size);
                     
+                cudaEventRecord(end[i], stream[i]);
                 cudaMemcpyAsync(results + i * stream_size, gpu_results + i * stream_size, text_stream_size * sizeof(int), cudaMemcpyDeviceToHost, stream[i]);
             }
 
@@ -410,17 +433,17 @@ void gpu_onept_call (int algorithm, int granularity, int stream_num, unsigned ch
     }
 
     // Compute time for elaboration
-    //cudaEventElapsedTime(&elaboration_time, start, end);
-    //elaboration_time /= 1000;
-    //printf("Kernel operations terminated in %f seconds\n", elaboration_time);
+    for (int i = 0; i < stream_num; i++) {
+        cudaEventElapsedTime(&elaboration_time, start[i], end[i]);
+        printf("Kernel operations of stream %d terminated in %f ms\n", i, elaboration_time);
+    }
 
-    // Streams
-    for (int i = 0; i < stream_num; i++)
+    // Streams & Events
+    for (int i = 0; i < stream_num; i++) {
         cudaStreamDestroy(stream[i]);
-
-    // Events
-    cudaEventDestroy(start);
-    cudaEventDestroy(end);
+        cudaEventDestroy(start[i]);
+        cudaEventDestroy(end[i]);
+    }
 
     // Free GPU memory
     cudaFree(gpu_text);
@@ -431,6 +454,8 @@ void gpu_onept_call (int algorithm, int granularity, int stream_num, unsigned ch
     cudaFree(gpu_gshifts);
 
     free(stream);
+    free(start);
+    free(end);
 }
 
 
@@ -444,9 +469,10 @@ void gpu_multipt_call (int granularity, unsigned char *text, int text_size, unsi
     int grid_size_x, grid_size_y, subtext_num, pt_stream;
     int *gpu_results;
     unsigned char *gpu_text, *gpu_pattern;
+    float elaboration_time;
 
     cudaStream_t stream[MAX_MULTIPT_STREAM];
-    cudaEvent_t start, end;
+    cudaEvent_t start[MAX_MULTIPT_STREAM], end[MAX_MULTIPT_STREAM];
 
     // Kernel parameters definition
     printf("Defining grid and block dimensions...\n");
@@ -464,13 +490,12 @@ void gpu_multipt_call (int granularity, unsigned char *text, int text_size, unsi
     printf("Stream allocated: %d\n", MAX_MULTIPT_STREAM);
     printf("Grid (per stream): %dx%d\nBlocks: %dx%d\n\n", grid_size_x, grid_size_y, BLOCK_DIMENSION, BLOCK_DIMENSION);
 
-    // Streams
-    for (int i = 0; i < MAX_MULTIPT_STREAM; i++)
+    // Streams & Events
+    for (int i = 0; i < MAX_MULTIPT_STREAM; i++) {
         cudaStreamCreate(&stream[i]);
-
-    // Events
-    cudaEventCreate(&start);
-    cudaEventCreate(&end);
+        cudaEventCreate(&(start[i]));
+        cudaEventCreate(&(end[i]));
+    }
 
     // GPU allocations and copy
     cudaMalloc((void **) &gpu_text, text_size * sizeof(unsigned char));
@@ -484,18 +509,28 @@ void gpu_multipt_call (int granularity, unsigned char *text, int text_size, unsi
         printf("Launching the kernel for pattern %d using stream %d...\n", i+1, pt_stream);
         
         cudaMemcpyAsync(gpu_pattern + i * MAX_PATTERN_LENGTH, pattern[i], pattern_size[i] * sizeof(unsigned char), cudaMemcpyHostToDevice, stream[pt_stream]);
+        cudaEventRecord(start[i], stream[i]);
+
         rk_gpu<<<gridDimension, blockDimension, 0, stream[pt_stream]>>>(gpu_text, text_size, gpu_pattern + i * MAX_PATTERN_LENGTH, pattern_size[i], granularity, gpu_results + i * text_size);
+        
+        cudaEventRecord(end[i], stream[i]);
+        cudaEventSynchronize(end[i]);
         cudaMemcpyAsync(results[i], gpu_results + i * text_size, text_size * sizeof(int), cudaMemcpyDeviceToHost, stream[pt_stream]);
     }
     cudaDeviceSynchronize();
-         
-    // Streams
-    for (int i = 0; i < MAX_MULTIPT_STREAM; i++)
-        cudaStreamDestroy(stream[i]);
 
-    // Events
-    cudaEventDestroy(start);
-    cudaEventDestroy(end);
+    // Compute time for elaboration
+    for (int i = 0; i < pattern_number; i++) {
+        cudaEventElapsedTime(&elaboration_time, start[i], end[i]);
+        printf("Kernel operations of stream %d terminated in %f ms\n", i, elaboration_time);
+    }
+         
+    // Streams & Events
+    for (int i = 0; i < MAX_MULTIPT_STREAM; i++) {
+        cudaStreamDestroy(stream[i]);
+        cudaEventDestroy(start[i]);
+        cudaEventDestroy(end[i]);
+    }
 
     // Free GPU memory
     cudaFree(gpu_pattern);
