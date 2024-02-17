@@ -83,8 +83,6 @@ __global__ void naive_rk_gpu (unsigned char *text, int text_size, unsigned char 
         h = (h * ALPHABET_SIZE) % OVERFLOW_PM;
 
     for (int i = 0; (i < search_size) && ((text_index + i) < (text_size - pattern_size + 1)); i++) {
-        //printf("Thread: %d\tIndex: %d\tText size: %d\tText start: %d\n", index, text_index, text_size, text);
-
         // If the hashes are equal, most likely a hit but a check is required
         found = 0;
         if (hash_pattern == hash_text) {
@@ -135,7 +133,6 @@ __global__ void rk_gpu (unsigned char *text, int text_size, unsigned char *patte
     for (int m = 0; m < copy_amount; m++) {
         copy_index = (index * copy_amount + m) % pattern_size;
         local_pattern[copy_index] = pattern[copy_index];
-        //printf("Thread: %d\tBlockX: %d\tBlockY: %d\tCI: %d\t%c\n", index, blockIdx.x, blockIdx.y, copy_index, local_pattern[copy_index]);
     }
     __syncthreads();
 
@@ -153,8 +150,6 @@ __global__ void rk_gpu (unsigned char *text, int text_size, unsigned char *patte
         h = (h * ALPHABET_SIZE) % OVERFLOW_PM;
 
     for (int i = 0; (i < search_size) && ((text_index + i) < (text_size - pattern_size + 1)); i++) {
-        //printf("Thread: %d\tIndex: %d\t %d\n", index, search_size, text_index + i);
-
         // If the hashes are equal, most likely a hit but a check is required
         found = 0;
         if (hash_pattern == hash_text) {
@@ -288,7 +283,6 @@ __global__ void naive_kmp_gpu (unsigned char *text, int text_size, unsigned char
         *  Move back to the previous LPS to avoid re-comparing old characters
         */
         if (j == pattern_size) {
-            printf("%d\t%d\n", index, text_index + i);
             match_result[i-j] = 1;
             j = lps[j-1];
         } 
@@ -324,7 +318,6 @@ __global__ void kmp_gpu (unsigned char *text, int text_size, unsigned char *patt
         copy_index = (index * copy_amount + m) % pattern_size;
         local_pattern[copy_index] = pattern[copy_index];
         local_lps[copy_index] = lps[copy_index];
-        //printf("Thread: %d\tBlockX: %d\tBlockY: %d\tCI: %d\t%c\n", index, blockIdx.x, blockIdx.y, copy_index, local_pattern[copy_index]);
     }
     __syncthreads();
 
@@ -554,7 +547,6 @@ __global__ void boyer_moore_gpu (unsigned char *text, int text_size, unsigned ch
         copy_index = (index * copy_amount + m) % pattern_size;
         local_pattern[copy_index] = pattern[copy_index];
         local_gshifts[copy_index] = gshifts[copy_index];
-        //printf("Thread: %d\tBlockX: %d\tBlockY: %d\tCI: %d\t%d\n", index, blockIdx.x, blockIdx.y, copy_index, local_gshifts[copy_index]);
     }
     __syncthreads();
 
