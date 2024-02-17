@@ -98,9 +98,6 @@ __global__ void naive_rk_gpu (unsigned char *text, int text_size, unsigned char 
         // Save result
         match_result[text_index + i] = found;
 
-        // if (found == 1)
-        //     printf("Thread: %d\tIndex: %d\tText size: %d\tText start: %d\n", index, text_index + i, text_size, text);
-
         // Prepare next text window hash
         if (i < text_size - pattern_size)
             hash_text = (ALPHABET_SIZE * (hash_text - text[text_index+i] * h) + text[text_index+i+pattern_size]) % OVERFLOW_PM;
@@ -156,7 +153,7 @@ __global__ void rk_gpu (unsigned char *text, int text_size, unsigned char *patte
         h = (h * ALPHABET_SIZE) % OVERFLOW_PM;
 
     for (int i = 0; (i < search_size) && ((text_index + i) < (text_size - pattern_size + 1)); i++) {
-        // printf("Thread: %d\tIndex: %d\t %d\n", index, search_size, text_index + i);
+        //printf("Thread: %d\tIndex: %d\t %d\n", index, search_size, text_index + i);
 
         // If the hashes are equal, most likely a hit but a check is required
         found = 0;
@@ -170,7 +167,7 @@ __global__ void rk_gpu (unsigned char *text, int text_size, unsigned char *patte
 
         // Save result
         match_result[text_index + i] = found;
-
+        
         // Prepare next text window hash
         if (i < text_size - pattern_size)
             hash_text = (ALPHABET_SIZE * (hash_text - text[text_index+i] * h) + text[text_index+i+pattern_size]) % OVERFLOW_PM;

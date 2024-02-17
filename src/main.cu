@@ -268,8 +268,9 @@ void gpu_onept_call (int algorithm, int granularity, int stream_num, unsigned ch
     int stream_size, text_stream_size;
     float elaboration_time;
 
-    int grid_size_x, grid_size_y, block_size_x, block_size_y, subtext_num;
+    int grid_size_x, grid_size_y, block_size_x, block_size_y;
     int *lps, *gpu_lps, *bshifts, *gpu_bshifts, *gshifts, *gpu_gshifts, *gpu_results;
+    float subtext_num, grid_size;
     unsigned char *gpu_text, *gpu_pattern;
 
     cudaStream_t *stream;
@@ -286,14 +287,24 @@ void gpu_onept_call (int algorithm, int granularity, int stream_num, unsigned ch
     *  The lower the value of g, the more threads are required to analyze everything
     *  The higher the value of g, the higher will be the time required by each thread to complete the search
     */
-    subtext_num = ceil(text_size / (stream_num * granularity)) + 1;
-    grid_size_x = ceil(sqrt(subtext_num / (block_size_x * block_size_y))) + 1;
-    grid_size_y = grid_size_x;
+    subtext_num = (float) text_size / (stream_num * granularity);
+    subtext_num = ceil(subtext_num);
+
+    grid_size = subtext_num / (block_size_x * block_size_y);
+    grid_size_x = (int) ceil(sqrt(grid_size));
+
+    if (ceil(grid_size) == grid_size_x) {
+        grid_size_y = 1;
+    }
+    else {
+        grid_size_y = grid_size_x;
+    }
+
 
     dim3 gridDimension(grid_size_x, grid_size_y);
     dim3 blockDimension(block_size_x, block_size_y);
     printf("Text size: %d bytes\nPattern size: %d bytes\n", text_size, pattern_size);
-    printf("Granularity: %d\nSubtext's number: %d\n", granularity, subtext_num);
+    printf("Granularity: %d\nSubtext's number: %.0f\n", granularity, subtext_num);
     printf("Stream allocated: %d\n", stream_num);
     printf("Grid (per stream): %dx%d\nBlocks: %dx%d\n\n", grid_size_x, grid_size_y, block_size_x, block_size_y);
 
@@ -337,6 +348,7 @@ void gpu_onept_call (int algorithm, int granularity, int stream_num, unsigned ch
                     rk_gpu<<<gridDimension, blockDimension, 0, stream[i]>>>(gpu_text + i * stream_size, text_stream_size, gpu_pattern, pattern_size, granularity, gpu_results + i * stream_size);
                 
                 cudaEventRecord(end[i], stream[i]);
+                cudaEventSynchronize(end[i]);
                 cudaMemcpyAsync(results + i * stream_size, gpu_results + i * stream_size, text_stream_size * sizeof(int), cudaMemcpyDeviceToHost, stream[i]);
             }
             
@@ -373,6 +385,7 @@ void gpu_onept_call (int algorithm, int granularity, int stream_num, unsigned ch
                     kmp_gpu<<<gridDimension, blockDimension, 0, stream[i]>>>(gpu_text + i * stream_size, text_stream_size, gpu_pattern, pattern_size, gpu_lps, granularity, gpu_results + i * stream_size);
                     
                 cudaEventRecord(end[i], stream[i]);
+                cudaEventSynchronize(end[i]);
                 cudaMemcpyAsync(results + i * stream_size, gpu_results + i * stream_size, text_stream_size * sizeof(int), cudaMemcpyDeviceToHost, stream[i]);
             }
 
@@ -418,6 +431,7 @@ void gpu_onept_call (int algorithm, int granularity, int stream_num, unsigned ch
                     boyer_moore_gpu<<<gridDimension, blockDimension, 0, stream[i]>>>(gpu_text + i * stream_size, text_stream_size, gpu_pattern, pattern_size, gpu_bshifts, gpu_gshifts, granularity, gpu_results + i * stream_size);
                     
                 cudaEventRecord(end[i], stream[i]);
+                cudaEventSynchronize(end[i]);
                 cudaMemcpyAsync(results + i * stream_size, gpu_results + i * stream_size, text_stream_size * sizeof(int), cudaMemcpyDeviceToHost, stream[i]);
             }
 
@@ -466,19 +480,28 @@ void gpu_onept_call (int algorithm, int granularity, int stream_num, unsigned ch
  */
 void gpu_multipt_call (int granularity, unsigned char *text, int text_size, unsigned char **pattern, int *pattern_size, int pattern_number, int **results) {
 
-    int grid_size_x, grid_size_y, subtext_num, pt_stream;
+    int grid_size_x, grid_size_y, pt_stream;
     int *gpu_results;
+    float grid_size, subtext_num, elaboration_time;
     unsigned char *gpu_text, *gpu_pattern;
-    float elaboration_time;
 
     cudaStream_t stream[MAX_MULTIPT_STREAM];
     cudaEvent_t start[MAX_MULTIPT_STREAM], end[MAX_MULTIPT_STREAM];
 
     // Kernel parameters definition
     printf("Defining grid and block dimensions...\n");
-    subtext_num = ceil(text_size / granularity) + 1;
-    grid_size_x = ceil(sqrt(subtext_num / (BLOCK_DIMENSION * BLOCK_DIMENSION))) + 1;
-    grid_size_y = grid_size_x;
+    subtext_num = (float) text_size / granularity;
+    subtext_num = ceil(subtext_num);
+
+    grid_size = subtext_num / (BLOCK_DIMENSION * BLOCK_DIMENSION);
+    grid_size_x = (int) ceil(sqrt(grid_size));
+
+    if (ceil(grid_size) == grid_size_x) {
+        grid_size_y = 1;
+    }
+    else {
+        grid_size_y = grid_size_x;
+    }
 
     dim3 gridDimension(grid_size_x, grid_size_y);
     dim3 blockDimension(BLOCK_DIMENSION, BLOCK_DIMENSION);
@@ -549,7 +572,7 @@ int evaluate_result(int *results, int text_size, int pattern_size) {
     printf("\n");
 
     for (int i = 0; i < (text_size - pattern_size + 1); i++){
-        if (results[i] == 1){
+        if (results[i] >= 1){
             matches++;
             printf("Match found at index: %d\n", i+1);
         }
