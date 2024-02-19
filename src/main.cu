@@ -516,7 +516,7 @@ void gpu_multipt_call (int granularity, unsigned char *text, int text_size, unsi
     for (int i = 0; i < pattern_number; i++) 
         printf("Pattern #%d size: %d bytes\n", i+1, pattern_size[i]);
 
-    printf("Granularity: %d\nSubtext's number: %d\n", granularity, subtext_num);
+    printf("Granularity: %d\nSubtext's number: %.0f\n", granularity, subtext_num);
     printf("Stream allocated: %d\n", MAX_MULTIPT_STREAM);
     printf("Grid (per stream): %dx%d\nBlocks: %dx%d\n\n", grid_size_x, grid_size_y, BLOCK_DIMENSION, BLOCK_DIMENSION);
 
