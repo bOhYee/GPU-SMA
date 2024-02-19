@@ -31,7 +31,14 @@ int main (int argc, char *argv[]) {
 
     // print_gpu_properties();
     parse_args(argc, argv, &text, &text_size, &pattern, &pattern_size, &pattern_number, &results);
-    read_program_parameters(&chs_algo, &chs_g, &chs_stream_num, pattern_number);
+    if (SCRIPT_MODE == 0) {
+        read_program_parameters(&chs_algo, &chs_g, &chs_stream_num, pattern_number);
+    }
+    else {
+        chs_algo = strtol(argv[3], NULL, 10);
+        chs_g = strtol(argv[4], NULL, 10);
+        chs_stream_num = strtol(argv[5], NULL, 10);
+    }
 
     // Init results 
     for (int i = 0; i < pattern_number; i++) {
@@ -87,7 +94,7 @@ void parse_args(int argc, char **argv, unsigned char **text, int *text_size, uns
     struct stat text_info, pattern_info;
 
     // Verify parameters
-    if (argc != 3) {
+    if (SCRIPT_MODE == 0 && argc != 3) {
         fprintf(stderr, "Call to the program performed incorrectly!\n");
         fprintf(stderr, "Send only two arguments: the path for the text to be searched on and the path for the pattern to use\n");
         exit(EXIT_FAILURE);

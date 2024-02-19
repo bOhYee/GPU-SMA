@@ -1,3 +1,7 @@
+/* Define if the program has to be launched through scripts or not
+ */
+#define SCRIPT_MODE 1
+
 /* Location where the pattern to search is defined/stored
  *
  * 1 - Constant memory; 2 - Read from stdin or defined in main function
