@@ -347,15 +347,20 @@ void gpu_onept_call (int algorithm, int granularity, int stream_num, unsigned ch
                     text_stream_size = text_size - i * stream_size;
 
                 cudaMemcpyAsync(gpu_text + i * stream_size, text + i * stream_size, text_stream_size * sizeof(unsigned char), cudaMemcpyHostToDevice, stream[i]);
-                cudaEventRecord(start[i], stream[i]);
+                
+                if (SCRIPT_MODE == 0)
+                    cudaEventRecord(start[i], stream[i]);
 
                 if (algorithm == NAIVE_RK)
                     naive_rk_gpu<<<gridDimension, blockDimension, 0, stream[i]>>>(gpu_text + i * stream_size, text_stream_size, gpu_pattern, pattern_size, granularity, gpu_results + i * stream_size);
                 else
                     rk_gpu<<<gridDimension, blockDimension, 0, stream[i]>>>(gpu_text + i * stream_size, text_stream_size, gpu_pattern, pattern_size, granularity, gpu_results + i * stream_size);
                 
-                cudaEventRecord(end[i], stream[i]);
-                cudaEventSynchronize(end[i]);
+                if (SCRIPT_MODE == 0) {
+                    cudaEventRecord(end[i], stream[i]);
+                    cudaEventSynchronize(end[i]);
+                }
+
                 cudaMemcpyAsync(results + i * stream_size, gpu_results + i * stream_size, text_stream_size * sizeof(int), cudaMemcpyDeviceToHost, stream[i]);
             }
             
@@ -384,15 +389,20 @@ void gpu_onept_call (int algorithm, int granularity, int stream_num, unsigned ch
                     text_stream_size = text_size - i * stream_size;
 
                 cudaMemcpyAsync(gpu_text + i * stream_size, text + i * stream_size, text_stream_size * sizeof(unsigned char), cudaMemcpyHostToDevice, stream[i]);
-                cudaEventRecord(start[i], stream[i]);
+               
+                if (SCRIPT_MODE == 0)
+                    cudaEventRecord(start[i], stream[i]);
 
                 if (algorithm == NAIVE_KMP)
                     naive_kmp_gpu<<<gridDimension, blockDimension, 0, stream[i]>>>(gpu_text + i * stream_size, text_stream_size, gpu_pattern, pattern_size, gpu_lps, granularity, gpu_results + i * stream_size);
                 else
                     kmp_gpu<<<gridDimension, blockDimension, 0, stream[i]>>>(gpu_text + i * stream_size, text_stream_size, gpu_pattern, pattern_size, gpu_lps, granularity, gpu_results + i * stream_size);
                     
-                cudaEventRecord(end[i], stream[i]);
-                cudaEventSynchronize(end[i]);
+                if (SCRIPT_MODE == 0) {
+                    cudaEventRecord(end[i], stream[i]);
+                    cudaEventSynchronize(end[i]);
+                }
+
                 cudaMemcpyAsync(results + i * stream_size, gpu_results + i * stream_size, text_stream_size * sizeof(int), cudaMemcpyDeviceToHost, stream[i]);
             }
 
@@ -430,15 +440,21 @@ void gpu_onept_call (int algorithm, int granularity, int stream_num, unsigned ch
                     text_stream_size = text_size - i * stream_size;
 
                 cudaMemcpyAsync(gpu_text + i * stream_size, text + i * stream_size, text_stream_size * sizeof(unsigned char), cudaMemcpyHostToDevice, stream[i]);
-                cudaEventRecord(start[i], stream[i]);
+
+                if (SCRIPT_MODE == 0)
+                    cudaEventRecord(start[i], stream[i]);
 
                 if (algorithm == NAIVE_BM)
                     naive_boyer_moore_gpu<<<gridDimension, blockDimension, 0, stream[i]>>>(gpu_text + i * stream_size, text_stream_size, gpu_pattern, pattern_size, gpu_bshifts, gpu_gshifts, granularity, gpu_results + i * stream_size);
                 else
                     boyer_moore_gpu<<<gridDimension, blockDimension, 0, stream[i]>>>(gpu_text + i * stream_size, text_stream_size, gpu_pattern, pattern_size, gpu_bshifts, gpu_gshifts, granularity, gpu_results + i * stream_size);
-                    
-                cudaEventRecord(end[i], stream[i]);
-                cudaEventSynchronize(end[i]);
+                
+                
+                if (SCRIPT_MODE == 0) {
+                    cudaEventRecord(end[i], stream[i]);
+                    cudaEventSynchronize(end[i]);
+                }
+
                 cudaMemcpyAsync(results + i * stream_size, gpu_results + i * stream_size, text_stream_size * sizeof(int), cudaMemcpyDeviceToHost, stream[i]);
             }
 
@@ -539,12 +555,17 @@ void gpu_multipt_call (int granularity, unsigned char *text, int text_size, unsi
         printf("Launching the kernel for pattern %d using stream %d...\n", i+1, pt_stream);
         
         cudaMemcpyAsync(gpu_pattern + i * MAX_PATTERN_LENGTH, pattern[i], pattern_size[i] * sizeof(unsigned char), cudaMemcpyHostToDevice, stream[pt_stream]);
-        cudaEventRecord(start[i], stream[i]);
+        
+        if (SCRIPT_MODE == 0)
+            cudaEventRecord(start[i], stream[i]);
 
         rk_gpu<<<gridDimension, blockDimension, 0, stream[pt_stream]>>>(gpu_text, text_size, gpu_pattern + i * MAX_PATTERN_LENGTH, pattern_size[i], granularity, gpu_results + i * text_size);
         
-        cudaEventRecord(end[i], stream[i]);
-        cudaEventSynchronize(end[i]);
+        if (SCRIPT_MODE == 0) {
+            cudaEventRecord(end[i], stream[i]);
+            cudaEventSynchronize(end[i]);
+        }
+
         cudaMemcpyAsync(results[i], gpu_results + i * text_size, text_size * sizeof(int), cudaMemcpyDeviceToHost, stream[pt_stream]);
     }
     cudaDeviceSynchronize();

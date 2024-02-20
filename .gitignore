@@ -1,5 +1,7 @@
+.vscode/*
 obj/*
 data/*
-.vscode/*
+scripts/*
+docs/*
 
 *.out
