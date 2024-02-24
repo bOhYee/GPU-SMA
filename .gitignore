@@ -2,6 +2,6 @@
 obj/*
 data/*
 scripts/*
-docs/*
 
 *.out
+*.pptx

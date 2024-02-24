@@ -1,6 +1,6 @@
 /* Define if the program has to be launched through scripts or not
  */
-#define SCRIPT_MODE 1
+#define SCRIPT_MODE 0
 
 /* Location where the pattern to search is defined/stored
  *
@@ -35,7 +35,7 @@
 /* GPU parameters definition
  */
 #define BLOCK_DIMENSION 16
-#define MAX_NUM_STREAM 5
+#define MAX_NUM_STREAM 8
 #define MAX_MULTIPT_STREAM 8
 
 /* Algorithms that can be chosen for test runs
