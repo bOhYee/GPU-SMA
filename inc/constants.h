@@ -1,12 +1,7 @@
 /* Define if the program has to be launched through scripts or not
+ * 0 - Normal launch; 1 - Scripted
  */
 #define SCRIPT_MODE 0
-
-/* Location where the pattern to search is defined/stored
- *
- * 1 - Constant memory; 2 - Read from stdin or defined in main function
- */
-#define PATTERN_LOCATION 2
 
 /* Maximum pattern number
  * 
